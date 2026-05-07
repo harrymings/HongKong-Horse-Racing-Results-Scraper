@@ -16,6 +16,10 @@ model.pkl
 .env
 *.env
 
+# Output CSVs
+/output/
+races_*.csv
+
 # IDEs
 .vscode/
 *.suo

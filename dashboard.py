@@ -193,6 +193,15 @@ def run_scrape_job(start_date, end_date, output_mode='single'):
                 df_all.to_csv(os.path.join(OUTPUT_DIR, all_name), index=False, encoding='utf-8-sig')
                 job['output_file'] = all_name
                 job['log'].append(f"Combined CSV: {all_name}")
+                # remove per-day files to avoid confusion
+                for d in dates:
+                    fname = os.path.join(OUTPUT_DIR, f"races_{d.strftime('%Y-%m-%d')}.csv")
+                    try:
+                        if os.path.exists(fname):
+                            os.remove(fname)
+                            job['log'].append(f"Removed per-day file: {os.path.basename(fname)}")
+                    except Exception as e:
+                        job['log'].append(f"Failed to remove {fname}: {e}")
             else:
                 # separate files were saved per day; report number of files
                 job['output_file'] = None

@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Racing Scraper Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>body{padding:18px}</style>
+  </head>
+  <body>
+    <div class="container">
+      <h1 class="mb-3">Racing Scraper Dashboard</h1>
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <div class="alert alert-info">{{ messages[0] }}</div>
+        {% endif %}
+      {% endwith %}
+
+      <div class="card mb-3">
+        <div class="card-body">
+          <form id="start-form" method="post" action="/run" class="row g-2 align-items-end">
+            <div class="col-auto">
+              <label class="form-label">Start</label>
+              <input class="form-control" type="date" name="start_date" value="{{ default_start }}">
+            </div>
+            <div class="col-auto">
+              <label class="form-label">End</label>
+              <input class="form-control" type="date" name="end_date" value="{{ default_end }}">
+            </div>
+            <div class="col-auto">
+              <label class="form-label">Output</label>
+              <div>
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="radio" name="output_mode" id="out_single" value="single" checked>
+                  <label class="form-check-label" for="out_single">Single CSV (default)</label>
+                </div>
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="radio" name="output_mode" id="out_separate" value="separate">
+                  <label class="form-check-label" for="out_separate">Separate per-day CSVs</label>
+                </div>
+              </div>
+            </div>
+            <div class="col-auto">
+              <button id="start-btn" class="btn btn-primary">Start Scrape</button>
+            </div>
+            <div class="col-auto">
+              <button id="stop-btn" class="btn btn-warning" type="button" disabled>Stop</button>
+            </div>
+            <div class="col-auto">
+              <button class="btn btn-secondary" id="refresh-files" type="button">Refresh Files</button>
+            </div>
+          </form>
+
+          <div class="mt-3">
+            <div class="progress" style="height:22px">
+              <div id="progress-bar" class="progress-bar" role="progressbar" style="width:0%">Idle</div>
+            </div>
+            <div class="mt-2"><small id="progress-text"></small></div>
+            <div class="mt-2">
+              <a id="download-link" class="btn btn-success btn-sm" href="#" style="display:none">Download Combined CSV</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Merge functionality removed for a simpler UI -->
+
+      <style>
+        /* Minimal, modern tweaks */
+        body { background: #f4f6f8; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 6px 18px rgba(15,23,42,0.06); }
+        .btn-primary { background: linear-gradient(90deg,#4f46e5,#06b6d4); border: none; }
+        .btn-warning { background:#f59e0b; border:none }
+      </style>
+
+      <div class="card mb-3">
+        <div class="card-body">
+          <h5>CSV Files</h5>
+          <div id="files-area">
+            {% if csv_files %}
+              <table class="table table-sm">
+                <thead><tr><th>Filename</th><th>Actions</th></tr></thead>
+                <tbody>
+                {% for f in csv_files %}
+                <tr>
+                  <td>{{ f }}</td>
+                  <td>
+                    <a class="btn btn-outline-primary btn-sm" href="/preview?file={{ f }}">Preview</a>
+                    <a class="btn btn-outline-secondary btn-sm" href="/download/{{ f }}">Download</a>
+                  </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <div>No CSV files yet.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <h5>Live log</h5>
+          <pre id="log" style="height:200px;overflow:auto;background:#f8f9fa;padding:8px"></pre>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      async function fetchStatus(){
+        try{
+          const res = await fetch('/status');
+          const j = await res.json();
+          const bar = document.getElementById('progress-bar');
+          const txt = document.getElementById('progress-text');
+          const log = document.getElementById('log');
+          const startBtn = document.getElementById('start-btn');
+          const stopBtn = document.getElementById('stop-btn');
+          const dl = document.getElementById('download-link');
+          if(j.running){
+            const pct = j.total? Math.round((j.done/j.total)*100):0;
+            bar.style.width = pct + '%';
+            bar.textContent = pct + '%';
+            bar.classList.remove('bg-success');
+            bar.classList.add('bg-info');
+            txt.textContent = `Scraping ${j.current} — ${j.done}/${j.total}`;
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            dl.style.display = 'none';
+          } else {
+            bar.style.width = '100%';
+            bar.classList.remove('bg-info');
+            bar.classList.add('bg-success');
+            bar.textContent = j.output_file? 'Finished' : 'Idle';
+            txt.textContent = j.output_file? `Output: ${j.output_file}` : '';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            if(j.output_file){
+              dl.href = '/download/' + j.output_file;
+              dl.style.display = 'inline-block';
+            } else {
+              dl.style.display = 'none';
+            }
+          }
+          log.textContent = j.log.join('\n');
+        }catch(e){
+          console.error(e);
+        }
+      }
+      setInterval(fetchStatus,1000);
+      document.getElementById('refresh-files').addEventListener('click', ()=> location.reload());
+      document.getElementById('stop-btn').addEventListener('click', async ()=>{
+        await fetch('/stop', {method:'POST'});
+        fetchStatus();
+      });
+      fetchStatus();
+    </script>
+  </body>
+</html>

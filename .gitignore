@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environment
+.venv/
+
+# Data and mappings
+/data/
+/mappings/
+checkpoint.json
+model.pkl
+
+# Environment / secrets
+.env
+*.env
+
+# IDEs
+.vscode/
+*.suo
+*.user
+*.pyc
+
+# OS
+Thumbs.db
+Desktop.ini

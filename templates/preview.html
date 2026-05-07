@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Preview - {{ filename }}</title>
+    <style>body{font-family:Arial;margin:16px} table{border-collapse:collapse} table td, table th{border:1px solid #ccc;padding:6px}</style>
+  </head>
+  <body>
+    <h1>Preview: {{ filename }}</h1>
+    <div>{{ table|safe }}</div>
+    <p><a href="/">Back</a> | <a href="/download/{{ filename }}">Download</a></p>
+  </body>
+</html>

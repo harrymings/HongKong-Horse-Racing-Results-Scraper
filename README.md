@@ -13,8 +13,15 @@ This project is for educational purposes only and is not intended for commerical
 Please install all necessary python packages by running
 pip install -r requirements.txt
 
-# Sample 
-<img width="2373" height="899" alt="Sample_data" src="https://github.com/user-attachments/assets/b920b0a8-51de-4ea9-86d5-89350dded08c" />
+# Sample
+
+### Build a data export and run a scrape job
+
+<img width="100%" alt="HKJC Results Desk dashboard: build a data export form with date range, racecourse, file format and grouping options, plus the scrape job panel showing progress, the download button and the per-date activity log" src="docs/dashboard_export_form.png" />
+
+### Saved exports with weather-merged preview
+
+<img width="100%" alt="Saved exports table with delete, preview and download actions; the expanded preview shows race rows joined with racecourse station daily weather, including venue max, min and mean temperature columns" src="docs/dashboard_saved_exports.png" />
 
 ## Quickstart (Windows)
 1. Run one-click setup to create a virtualenv and install deps:

@@ -1,34 +1,28 @@
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory, flash, jsonify
+import json
 import os
+import re
 from datetime import datetime, timedelta, date
+from pathlib import Path
 import pandas as pd
 import time
-from selenium import webdriver
 import threading
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
+import httpx
+from urllib.parse import parse_qs, urlparse
+from scraper_incremental import DATA_DIR, DEFAULT_BASE_URL, IncrementalScraper, RaceNotPublished
 
 app = Flask(__name__)
-app.secret_key = "dev-secret"
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
 
-BASE_URL_TEMPLATE = "https://racing.hkjc.com/racing/information/English/racing/LocalResults.aspx?RaceDate={date}"
-# Save CSV outputs into a dedicated folder
-OUTPUT_DIR = os.path.join(os.path.abspath('.'), 'output')
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# Headless Chrome options
-def make_driver():
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1920,1080")
-    return webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
+BASE_URL_TEMPLATE = DEFAULT_BASE_URL + "?racedate={date}"
+OUTPUT_DIR = Path(__file__).parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
+COURSES = {"ST": "Sha Tin", "HV": "Happy Valley"}
+PREVIEW_COLUMNS = ["MeetDate", "RaceCourse", "RaceNumber", "HorseName", "Placing", "FinalWinOdds", "VenueWeatherStation", "VenueMaxTempC", "VenueMinTempC", "VenueMeanTempC", "WeatherMeanTempC", "WeatherRainfallMm", "WeatherMeanCloudPct", "HorseNo", "JockeyName", "TrainerName", "Draw", "FinishTime", "TrackType", "RailPosition", "VenueWeatherStatus", "WeatherStatus"]
+HKO_DAILY_ARCHIVE = "https://www.hko.gov.hk/cis/dailyExtract/dailyExtract_{year}{month:02d}.xml"
+HKO_OPEN_DATA = "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php"
+# Stations located AT the racecourses (HKO Open Data API station codes).
+VENUE_STATIONS = {"Sha Tin": "SHA", "Happy Valley": "HPV"}
 
 
 # In-memory job status
@@ -39,6 +33,8 @@ job = {
     'current': '',
     'log': [],
     'output_file': None,
+    'downloads': [],
+    'error': None,
 }
 
 
@@ -47,126 +43,235 @@ def daterange(start_date, end_date):
         yield start_date + timedelta(n)
 
 
-def get_safe_text(element, by, value, default="N/A"):
+def _course_from_url(race_url):
+    query = parse_qs(urlparse(race_url).query)
+    return next((values[0].upper() for key, values in query.items() if key.lower() == 'racecourse' and values), None)
+
+
+def _race_rows(races):
+    rows = []
+    for race in races:
+        weather = race.get("weather") or {}
+        venue_weather = race.get("venue_weather") or {}
+        for runner in race['runners']:
+            rows.append({
+                "MeetDate": race["meeting_date"],
+                "RaceURL": race["source_url"],
+                "RaceHeader": race["race_name"],
+                "RaceDetails": race["grade"],
+                "RaceGoing": race["going"],
+                "RaceCourse": race["venue"],
+                "CourseDescription": race.get("course_description"),
+                "TrackType": race.get("track_type"),
+                "RailPosition": race.get("rail_position"),
+                "RaceNumber": race["race_number"],
+                "DistanceM": race["distance_m"],
+                "Placing": runner["finishing_pos_text"],
+                "HorseNo": runner["horse_no"],
+                "HorseName": runner["horse_name"],
+                "HorseLink": runner["horse_url"],
+                "JockeyName": runner["jockey_name"],
+                "JockeyLink": runner["jockey_url"],
+                "TrainerName": runner["trainer_name"],
+                "TrainerLink": runner["trainer_url"],
+                "ActualWt": runner["actual_weight"],
+                "DeclaredHorseWt": runner["declared_horse_weight"],
+                "Draw": runner["draw"],
+                "Margin": runner["margin_text"],
+                "RunningPosition": runner["running_position"],
+                "FinishTime": runner["finishing_time_text"],
+                "WinOdds": runner["win_odds"],
+                "FinalWinOdds": runner.get("final_win_odds"),
+                "InitialWinOdds": runner.get("initial_win_odds"),
+                "Gear": runner.get("gear"),
+                "JockeyAllowance": runner.get("jockey_allowance"),
+                "Sectionals": json.dumps(runner.get("sectionals", []), ensure_ascii=False),
+                "Dividends": json.dumps(race.get("dividends", []), ensure_ascii=False),
+                "WeatherDate": weather.get("date"),
+                "WeatherStation": weather.get("station"),
+                "WeatherResolution": "Daily" if weather else None,
+                "WeatherMeanPressureHpa": weather.get("mean_pressure_hpa"),
+                "WeatherMaxTempC": weather.get("max_temp_c"),
+                "WeatherMeanTempC": weather.get("mean_temp_c"),
+                "WeatherMinTempC": weather.get("min_temp_c"),
+                "WeatherMeanDewPointC": weather.get("mean_dew_point_c"),
+                "WeatherMeanHumidityPct": weather.get("mean_humidity_pct"),
+                "WeatherMeanCloudPct": weather.get("mean_cloud_pct"),
+                "WeatherRainfallMm": weather.get("rainfall_mm"),
+                "WeatherRainfallTrace": weather.get("rainfall_trace"),
+                "WeatherSource": weather.get("source_url"),
+                "WeatherStatus": "Matched by meeting date; HKO station, not venue or race-time conditions" if weather else "No historical daily observation available",
+                "VenueWeatherStation": venue_weather.get("station"),
+                "VenueWeatherDate": venue_weather.get("date"),
+                "VenueMaxTempC": venue_weather.get("max_temp_c"),
+                "VenueMinTempC": venue_weather.get("min_temp_c"),
+                "VenueMeanTempC": venue_weather.get("mean_temp_c"),
+                "VenueWeatherSource": venue_weather.get("source_url"),
+                "VenueWeatherStatus": ("Daily max/min measured at the " + venue_weather["station"] + " racecourse station; whole-day values, not race-time readings") if venue_weather else "No racecourse-station observation published yet",
+                "HorseId": runner["horse_id"],
+                "JockeyId": runner["jockey_id"],
+                "TrainerId": runner["trainer_id"],
+            })
+    return rows
+
+
+def _save_exports(races, file_stem, output_format):
+    downloads = []
+    if output_format in {"csv", "both"}:
+        csv_name = f"{file_stem}.csv"
+        pd.DataFrame(_race_rows(races)).to_csv(OUTPUT_DIR / csv_name, index=False, encoding='utf-8-sig')
+        downloads.append(csv_name)
+    if output_format in {"json", "both"}:
+        json_name = f"{file_stem}.json"
+        (OUTPUT_DIR / json_name).write_text(json.dumps(races, indent=2), encoding="utf-8")
+        downloads.append(json_name)
+    return downloads
+
+
+def _weather_number(value):
     try:
-        return element.find_element(by, value).text.strip()
-    except NoSuchElementException:
-        return default
+        return float(value.strip())
+    except (AttributeError, ValueError):
+        return None
 
 
-def extract_horse_jockey_trainer_info(cell_element):
-    name, link = "N/A", "N/A"
-    try:
-        link_element = cell_element.find_element(By.TAG_NAME, "a")
-        name = link_element.text.strip()
-        link = link_element.get_attribute("href")
-    except NoSuchElementException:
-        name = cell_element.text.strip()
-    return name, link
-
-
-def scrape_date(driver, meet_date_str):
-    meet_data_for_csv = []
-    initial_url = BASE_URL_TEMPLATE.format(date=meet_date_str)
-    driver.get(initial_url)
-
-    try:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((
-                By.XPATH, "//div[contains(@class, 'top_races')]//table | //div[contains(text(), 'No race meeting.') ]"
-            ))
-        )
-    except TimeoutException:
-        return meet_data_for_csv
-
-    try:
-        driver.find_element(By.XPATH, "//div[contains(text(), 'No race meeting.')]")
-        return meet_data_for_csv
-    except NoSuchElementException:
-        pass
-
-    race_links_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'top_races')]//table//td/a[contains(@href, 'LocalResults.aspx')]")
-    race_page_urls = {initial_url}
-    for elem in race_links_elements:
-        href = elem.get_attribute("href")
-        if href and "LocalResults.aspx" in href and "ResultsAll.aspx" not in href:
-            race_page_urls.add(href)
-
-    sorted_race_urls = sorted(
-        list(race_page_urls),
-        key=lambda url: int(url.split("RaceNo=")[-1]) if "RaceNo=" in url and url.split("RaceNo=")[-1].isdigit() else 0
-    )
-
-    for race_url in sorted_race_urls:
-        try:
-            driver.get(race_url)
-            performance_table_locator = (By.XPATH, "//div[@class='performance']/table[contains(@class, 'draggable')]")
-            WebDriverWait(driver, 20).until(EC.presence_of_element_located(performance_table_locator))
-        except TimeoutException:
-            continue
-
-        race_header_full, race_details_text, race_specific_name, race_going, race_course = ("N/A",) * 5
-        try:
-            race_info_element = driver.find_element(By.XPATH, "//div[contains(@class, 'race_tab')]/table")
-            race_header_full = get_safe_text(race_info_element, By.XPATH, ".//thead/tr/td[1]")
-            race_details_text = get_safe_text(race_info_element, By.XPATH, ".//tbody/tr[2]/td[1]")
-            race_specific_name = get_safe_text(race_info_element, By.XPATH, ".//tbody/tr[3]/td[1]")
-            race_going = get_safe_text(race_info_element, By.XPATH, ".//tbody/tr[2]/td[3]")
-            race_course = get_safe_text(race_info_element, By.XPATH, ".//tbody/tr[3]/td[3]")
-        except NoSuchElementException:
-            pass
-
-        try:
-            performance_table = driver.find_element(*performance_table_locator)
-            body_rows = performance_table.find_elements(By.XPATH, "./tbody/tr")
-            for row in body_rows:
-                cols = row.find_elements(By.TAG_NAME, "td")
-                if len(cols) < 12:
+def _fetch_daily_weather(meeting_date, month_cache):
+    month_key = (meeting_date.year, meeting_date.month)
+    if month_key not in month_cache:
+        source_url = HKO_DAILY_ARCHIVE.format(year=meeting_date.year, month=meeting_date.month)
+        response = httpx.get(source_url, timeout=20, follow_redirects=True)
+        if response.status_code == 404:
+            month_cache[month_key] = {}
+        else:
+            response.raise_for_status()
+            daily = {}
+            for month in response.json()["stn"]["data"]:
+                if int(month["month"]) != meeting_date.month:
                     continue
-                placing = cols[0].text.strip()
-                horse_name, horse_link = extract_horse_jockey_trainer_info(cols[2])
-                horse_data = {
-                    "MeetDate": meet_date_str,
-                    "RaceURL": race_url,
-                    "RaceHeader": race_header_full,
-                    "RaceDetails": race_details_text,
-                    "RaceSpecificName": race_specific_name,
-                    "RaceGoing": race_going,
-                    "RaceCourse": race_course,
-                    "Placing": placing,
-                    "HorseNo": cols[1].text.strip(),
-                    "HorseName": horse_name,
-                    "HorseLink": horse_link,
-                    "JockeyName": extract_horse_jockey_trainer_info(cols[3])[0],
-                    "JockeyLink": extract_horse_jockey_trainer_info(cols[3])[1],
-                    "TrainerName": extract_horse_jockey_trainer_info(cols[4])[0],
-                    "TrainerLink": extract_horse_jockey_trainer_info(cols[4])[1],
-                    "ActualWt": cols[5].text.strip(),
-                    "DeclarHorseWt": cols[6].text.strip(),
-                    "Draw": cols[7].text.strip(),
-                    "LBW": cols[8].text.strip(),
-                    "RunningPosition": " ".join([rp.text.strip() for rp in cols[9].find_elements(By.XPATH, ".//div/div") if rp.text.strip()]),
-                    "FinishTime": cols[10].text.strip(),
-                    "WinOdds": cols[11].text.strip(),
-                }
-                meet_data_for_csv.append(horse_data)
-        except Exception:
-            pass
-
-    return meet_data_for_csv
+                for values in month["dayData"]:
+                    if not str(values[0]).isdigit() or len(values) < 9:
+                        continue
+                    date_key = date(meeting_date.year, meeting_date.month, int(values[0])).isoformat()
+                    daily[date_key] = {
+                        "date": date_key,
+                        "station": "Hong Kong Observatory",
+                        "mean_pressure_hpa": _weather_number(values[1]),
+                        "max_temp_c": _weather_number(values[2]),
+                        "mean_temp_c": _weather_number(values[3]),
+                        "min_temp_c": _weather_number(values[4]),
+                        "mean_dew_point_c": _weather_number(values[5]),
+                        "mean_humidity_pct": _weather_number(values[6]),
+                        "mean_cloud_pct": _weather_number(values[7]),
+                        "rainfall_mm": _weather_number(values[8]),
+                        "rainfall_trace": str(values[8]).strip().lower() == "trace",
+                        "source_url": source_url,
+                    }
+            month_cache[month_key] = daily
+    return month_cache[month_key].get(meeting_date.isoformat())
 
 
-def run_scrape_job(start_date, end_date, output_mode='single'):
+def _fetch_venue_weather(venue, meeting_date, ryes_cache, clm_cache):
+    """Daily weather from the HKO station AT the racecourse (SHA = Sha Tin, HPV = Happy Valley).
+
+    Max/min temp come from the RYES daily bulletin (published ~01:30 the next day,
+    so available to yesterday). Mean temp comes from the CLMTEMP climate dataset,
+    which loads with a longer lag (~1 month). Both are whole-day values for the
+    meeting date at the racecourse station -- not race-time readings.
+    """
+    station_code = VENUE_STATIONS.get((venue or '').strip())
+    if not station_code:
+        return None
+    camel = venue.strip().replace(' ', '')  # RYES JSON keys drop spaces: 'Sha Tin' -> 'ShaTinMaxTemp'
+    ryes_key = (station_code, meeting_date.isoformat())
+    if ryes_key not in ryes_cache:
+        report = None
+        try:
+            response = httpx.get(HKO_OPEN_DATA, params={
+                'dataType': 'RYES', 'lang': 'en',
+                'date': meeting_date.strftime('%Y%m%d'), 'station': station_code,
+            }, timeout=20, follow_redirects=True)
+            if response.status_code == 200:
+                data = response.json()
+                max_t = _weather_number(data.get(f'{camel}MaxTemp'))
+                min_t = _weather_number(data.get(f'{camel}MinTemp'))
+                if max_t is not None or min_t is not None:
+                    report = {
+                        'date': meeting_date.isoformat(),
+                        'station': venue.strip(),
+                        'station_code': station_code,
+                        'max_temp_c': max_t,
+                        'min_temp_c': min_t,
+                        'mean_temp_c': None,
+                        'source_url': f'{HKO_OPEN_DATA}?dataType=RYES&date={meeting_date.strftime("%Y%m%d")}&station={station_code}',
+                    }
+        except (httpx.HTTPError, ValueError):
+            report = None
+        ryes_cache[ryes_key] = report
+    report = ryes_cache[ryes_key]
+    if report is None:
+        return None
+    if report.get('mean_temp_c') is None:
+        clm_key = (station_code, meeting_date.year, meeting_date.month)
+        if clm_key not in clm_cache:
+            monthly = {}
+            try:
+                response = httpx.get(HKO_OPEN_DATA, params={
+                    'dataType': 'CLMTEMP', 'lang': 'en', 'rformat': 'json',
+                    'station': station_code, 'year': meeting_date.year, 'month': meeting_date.month,
+                }, timeout=30, follow_redirects=True)
+                if response.status_code == 200:
+                    for row in response.json().get('data', []):
+                        if len(row) >= 4 and str(row[1]) == str(meeting_date.month):
+                            try:
+                                monthly[int(row[2])] = float(row[3])
+                            except (TypeError, ValueError):
+                                continue
+            except (httpx.HTTPError, ValueError):
+                pass
+            clm_cache[clm_key] = monthly
+        report['mean_temp_c'] = clm_cache[clm_key].get(meeting_date.day)
+    return report
+
+
+def scrape_date(scraper, meet_date_str, selected_courses):
+    races = []
+    iso_date = datetime.strptime(meet_date_str, "%d/%m/%Y").strftime("%Y/%m/%d")
+    scraper.base_url = BASE_URL_TEMPLATE.format(date=iso_date)
+    for race_url in scraper.list_recent_race_urls():
+        if _course_from_url(race_url) not in selected_courses:
+            continue
+        try:
+            race = scraper.parse_and_save(race_url)
+        except RaceNotPublished:
+            job['log'].append(f"No published results yet: {race_url}")
+            continue
+        except Exception as exc:
+            job['log'].append(f"Failed {race_url}: {exc}")
+            continue
+        races.append(race)
+        time.sleep(scraper.rate_limit)
+
+    return races
+
+
+def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', output_mode='single'):
     job['running'] = True
-    job['log'].append(f"Job started: {start_date} to {end_date}")
+    job['log'] = [f"Job started: {start_date} to {end_date}"]
     dates = [d for d in daterange(start_date, end_date)]
     job['total'] = len(dates)
     job['done'] = 0
     job['output_file'] = None
-    all_results = []
-    driver = None
+    job['downloads'] = []
+    job['error'] = None
+    races_by_date = []
+    weather_months = {}
+    ryes_cache = {}
+    clm_months = {}
+    matched_dates = set()
+    missing_dates = set()
+    scraper = None
     try:
-        driver = make_driver()
+        scraper = IncrementalScraper(DEFAULT_BASE_URL)
         for d in dates:
             if not job['running']:
                 job['log'].append('Job cancelled')
@@ -174,44 +279,54 @@ def run_scrape_job(start_date, end_date, output_mode='single'):
             meet_date = d.strftime('%d/%m/%Y')
             job['current'] = meet_date
             job['log'].append(f"Scraping {meet_date}")
-            results = scrape_date(driver, meet_date)
-            if results:
-                df = pd.DataFrame(results)
-                filename = f"races_{d.strftime('%Y-%m-%d')}.csv"
-                df.to_csv(os.path.join(OUTPUT_DIR, filename), index=False, encoding='utf-8-sig')
-                all_results.extend(results)
-                job['log'].append(f"Saved {filename} ({len(results)} rows)")
+            races = scrape_date(scraper, meet_date, selected_courses)
+            if races:
+                try:
+                    weather = _fetch_daily_weather(d, weather_months)
+                except (httpx.HTTPError, ValueError, KeyError) as exc:
+                    weather = None
+                    job['log'].append(f"HKO archive unavailable for {meet_date}: {exc}")
+                for race in races:
+                    race['weather'] = weather
+                    try:
+                        race['venue_weather'] = _fetch_venue_weather(race.get('venue'), d, ryes_cache, clm_months)
+                    except (httpx.HTTPError, ValueError, KeyError) as exc:
+                        race['venue_weather'] = None
+                        job['log'].append(f"Racecourse station weather unavailable for {race.get('venue')} {meet_date}: {exc}")
+                (matched_dates if weather else missing_dates).add(d.isoformat())
+                races_by_date.append((d, races))
+                runner_count = sum(len(race['runners']) for race in races)
+                job['log'].append(f"Collected {len(races)} races and {runner_count} runners")
+                if output_mode == 'separate':
+                    course_slug = "-".join(sorted(selected_courses)).lower()
+                    stem = f"hkjc_{course_slug}_{d.strftime('%Y-%m-%d')}"
+                    job['downloads'].extend(_save_exports(races, stem, output_format))
             else:
-                job['log'].append(f"No data for {meet_date}")
+                job['log'].append(f"No published race results for {meet_date}")
             job['done'] += 1
             time.sleep(0.1)
 
-        if all_results:
-            if output_mode == 'single':
-                df_all = pd.DataFrame(all_results)
-                all_name = f"races_{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}.csv"
-                df_all.to_csv(os.path.join(OUTPUT_DIR, all_name), index=False, encoding='utf-8-sig')
-                job['output_file'] = all_name
-                job['log'].append(f"Combined CSV: {all_name}")
-                # remove per-day files to avoid confusion
-                for d in dates:
-                    fname = os.path.join(OUTPUT_DIR, f"races_{d.strftime('%Y-%m-%d')}.csv")
-                    try:
-                        if os.path.exists(fname):
-                            os.remove(fname)
-                            job['log'].append(f"Removed per-day file: {os.path.basename(fname)}")
-                    except Exception as e:
-                        job['log'].append(f"Failed to remove {fname}: {e}")
-            else:
-                # separate files were saved per day; report number of files
-                job['output_file'] = None
-                job['log'].append(f"Saved separate files for {start_date} to {end_date}")
+        if races_by_date and output_mode == 'single':
+            all_races = [race for _, races in races_by_date for race in races]
+            course_slug = "-".join(sorted(selected_courses)).lower()
+            stem = f"hkjc_{course_slug}_{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}"
+            job['downloads'].extend(_save_exports(all_races, stem, output_format))
+        if races_by_date:
+            job['log'].append(f"Historical HKO daily weather matched {len(matched_dates)} meeting date(s); unavailable for {len(missing_dates)}")
+            venue_count = sum(1 for _, rs in races_by_date for r in rs if r.get('venue_weather'))
+            job['log'].append(f"Racecourse-station weather (Sha Tin/Happy Valley) attached to {venue_count} race(s)")
+        if job['downloads']:
+            job['output_file'] = job['downloads'][0]
+            job['log'].append(f"Ready to download {len(job['downloads'])} file(s)")
+        elif not races_by_date:
+            job['log'].append("No files created because no published races matched the selection")
     except Exception as e:
+        job['error'] = str(e)
         job['log'].append(f"Error: {e}")
     finally:
-        if driver:
+        if scraper:
             try:
-                driver.quit()
+                scraper.client.close()
             except Exception:
                 pass
         job['running'] = False
@@ -221,12 +336,32 @@ def run_scrape_job(start_date, end_date, output_mode='single'):
 
 @app.route('/')
 def index():
-    # defaults: past 30 days
-    today = date.today()
-    default_start = today - timedelta(days=30)
-    csv_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith('.csv')]
-    csv_files.sort(reverse=True)
-    return render_template('index.html', default_start=default_start, default_end=today, csv_files=csv_files)
+    meeting_dates = []
+    for path in DATA_DIR.glob('race_*.json'):
+        try:
+            meeting_dates.append(date.fromisoformat(json.loads(path.read_text(encoding='utf-8'))['meeting_date']))
+        except (ValueError, KeyError, OSError):
+            continue
+    default_date = max(meeting_dates, default=date.today() - timedelta(days=1))
+    data_files = sorted(
+        (path for path in OUTPUT_DIR.iterdir()
+         if path.is_file() and path.suffix in {'.csv', '.json'}
+         and not path.name.endswith(('_sectionals.csv', '_dividends.csv'))),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    exports = []
+    for path in data_files:
+        match = re.fullmatch(r'hkjc_([a-z-]+)_(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})', path.stem)
+        courses = ', '.join(COURSES.get(code.upper(), code.upper()) for code in match.group(1).split('-')) if match else None
+        scope = f"{courses} | {match.group(2)} to {match.group(3)}" if match else path.stem
+        exports.append({
+            "name": path.name,
+            "scope": scope,
+            "generated_at": datetime.fromtimestamp(path.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+        })
+    latest_export = next((export for export in exports if export['name'].endswith('.csv')), exports[0] if exports else None)
+    return render_template('index.html', default_start=default_date, default_end=default_date, exports=exports, latest_export=latest_export)
 
 
 @app.route('/run', methods=['POST'])
@@ -237,15 +372,37 @@ def run_scrape():
         flash('Start and end date are required')
         return redirect(url_for('index'))
 
-    start_date = datetime.strptime(start_str, '%Y-%m-%d').date()
-    end_date = datetime.strptime(end_str, '%Y-%m-%d').date()
+    try:
+        start_date = datetime.strptime(start_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_str, '%Y-%m-%d').date()
+    except ValueError:
+        flash('Dates must use the YYYY-MM-DD format')
+        return redirect(url_for('index'))
+    if end_date < start_date:
+        flash('End date must be on or after start date')
+        return redirect(url_for('index'))
+    if (end_date - start_date).days > 365:
+        flash('Choose a date range of 366 days or less')
+        return redirect(url_for('index'))
 
     if job['running']:
         flash('A job is already running')
         return redirect(url_for('index'))
 
+    selected_courses = sorted(set(request.form.getlist('courses')) & set(COURSES))
+    if not selected_courses:
+        flash('Select at least one racecourse')
+        return redirect(url_for('index'))
+    output_format = request.form.get('output_format', 'csv')
+    if output_format not in {'csv', 'json', 'both'}:
+        flash('Choose CSV, JSON, or both output formats')
+        return redirect(url_for('index'))
     output_mode = request.form.get('output_mode', 'single')
-    t = threading.Thread(target=run_scrape_job, args=(start_date, end_date, output_mode), daemon=True)
+    if output_mode not in {'single', 'separate'}:
+        flash('Choose combined or per-day files')
+        return redirect(url_for('index'))
+
+    t = threading.Thread(target=run_scrape_job, args=(start_date, end_date, selected_courses, output_format, output_mode), daemon=True)
     t.start()
     flash('Scraping started in background')
     return redirect(url_for('index'))
@@ -260,6 +417,8 @@ def status():
         'current': job['current'],
         'log': job['log'][-30:],
         'output_file': job['output_file'],
+        'downloads': job['downloads'],
+        'error': job['error'],
     })
 
 
@@ -274,40 +433,41 @@ def stop():
     return redirect(url_for('index'))
 
 
-@app.route('/merge', methods=['POST'])
-def merge_existing():
-    start_str = request.form.get('merge_start')
-    end_str = request.form.get('merge_end')
-    if not start_str or not end_str:
-        flash('Start and end date are required for merge')
-        return redirect(url_for('index'))
-    start_date = datetime.strptime(start_str, '%Y-%m-%d').date()
-    end_date = datetime.strptime(end_str, '%Y-%m-%d').date()
-    files = []
-    for d in daterange(start_date, end_date):
-        fname = os.path.join(OUTPUT_DIR, f"races_{d.strftime('%Y-%m-%d')}.csv")
-        if os.path.exists(fname):
-            files.append(fname)
-    if not files:
-        flash('No CSV files found for that date range')
-        return redirect(url_for('index'))
-    dfs = [pd.read_csv(f) for f in files]
-    df_all = pd.concat(dfs, ignore_index=True)
-    outname = f"merged_{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}.csv"
-    df_all.to_csv(os.path.join(OUTPUT_DIR, outname), index=False, encoding='utf-8-sig')
-    flash(f'Merged {len(files)} files into {outname}')
-    return redirect(url_for('index'))
+@app.route('/preview/data')
+def preview_data():
+    fname = Path(request.args.get('file', '')).name
+    file_path = OUTPUT_DIR / fname
+    if not fname or not fname.endswith('.csv') or not file_path.is_file() or file_path.parent != OUTPUT_DIR:
+        return jsonify({'error': 'CSV file not found'}), 404
+    df = pd.read_csv(file_path, nrows=50, usecols=lambda column: column in PREVIEW_COLUMNS)
+    df = df[[column for column in PREVIEW_COLUMNS if column in df.columns]]
+    records = json.loads(df.astype(object).where(pd.notna(df), None).to_json(orient='records'))
+    return jsonify({'filename': fname, 'columns': list(df.columns), 'rows': records, 'limit': 50})
 
 
-@app.route('/preview')
-def preview():
-    fname = request.args.get('file')
-    if not fname or not os.path.exists(fname):
-        flash('File not found')
-        return redirect(url_for('index'))
-    df = pd.read_csv(fname)
-    preview_html = df.head(50).to_html(index=False)
-    return render_template('preview.html', table=preview_html, filename=fname)
+@app.route('/delete_files', methods=['POST'])
+def delete_files():
+    requested = request.form.getlist('filenames')
+    deleted, skipped = [], []
+    for raw in requested:
+        fname = Path(raw).name
+        file_path = OUTPUT_DIR / fname
+        if (not fname or file_path.suffix.lower() not in {'.csv', '.json'}
+                or file_path.parent != OUTPUT_DIR or not file_path.is_file()):
+            skipped.append(raw)
+            continue
+        try:
+            file_path.unlink()
+            deleted.append(fname)
+        except OSError:
+            skipped.append(fname)
+    if not requested:
+        flash('Select at least one file to delete')
+    if deleted:
+        flash(f"Deleted {len(deleted)} file(s): {', '.join(deleted)}")
+    if skipped:
+        flash(f"Skipped {len(skipped)} file(s): not a CSV/JSON export in output/ or already gone")
+    return redirect(url_for('index') + '#saved-exports')
 
 
 @app.route('/download/<path:filename>')
@@ -316,4 +476,4 @@ def download(filename):
 
 
 if __name__ == '__main__':
-    app.run(port=8501, debug=True)
+    app.run(port=8501, debug=os.getenv('FLASK_DEBUG') == '1')

@@ -1,10 +1,11 @@
+from sqlalchemy import text
 from db import get_engine
 
 def check_db():
     try:
         eng = get_engine()
         with eng.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         print("DB OK")
         return 0
     except Exception as e:

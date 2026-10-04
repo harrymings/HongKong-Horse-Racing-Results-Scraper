@@ -10,23 +10,23 @@ set VENV_PY=.venv\Scripts\python.exe
 if exist requirements.txt (
     %VENV_PY% -m pip install -r requirements.txt || (
         echo "pip install -r requirements.txt failed, attempting fallback installs"
-        %VENV_PY% -m pip install httpx requests beautifulsoup4 lxml psycopg2-binary SQLAlchemy python-dotenv || (
+        %VENV_PY% -m pip install flask pandas httpx beautifulsoup4 lxml fastapi uvicorn psycopg2-binary SQLAlchemy python-dotenv polars scikit-learn || (
             echo "Fallback install also failed; please inspect the error above"
         )
     )
 ) else (
     echo requirements.txt not found; installing essential packages
-    %VENV_PY% -m pip install httpx requests beautifulsoup4 lxml psycopg2-binary SQLAlchemy python-dotenv
+    %VENV_PY% -m pip install flask pandas httpx beautifulsoup4 lxml fastapi uvicorn psycopg2-binary SQLAlchemy python-dotenv polars scikit-learn
 )
 echo.
 REM Create .env with placeholder DATABASE_URL if missing
 if not exist ".env" (
     echo DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/hkracing> .env
-    echo SCRAPER_BASE_URL=https://racing.hkjc.com/racing/information/English/racing/LocalResults.aspx>> .env
+    echo SCRAPER_BASE_URL=https://racing.hkjc.com/en-us/local/information/localresults>> .env
     echo Created .env with placeholder DATABASE_URL
     echo Please edit .env with your Postgres credentials
 )
 echo.
 echo Setup complete.
-echo Edit .env then run run_api.bat or run_scraper.bat
+echo Edit .env if needed, then run run_dashboard.bat or run_scraper.bat
 pause

@@ -1,6 +1,6 @@
 # HK-Race-Results-Scraper
-A Python script that automatically scrapes horse racing results from the Hong kong Jockey Club (HKJC) website 
-<br><a>https://racing.hkjc.com/racing/information/English/racing/LocalResults.aspx</a>.
+A Python application for scraping Hong Kong horse-racing results from the HKJC website:
+<https://racing.hkjc.com/en-us/local/information/localresults>.
 
 This repository now contains: scraper, incremental checkpointing, entity-resolution helpers, a PostgreSQL-backed schema, a FastAPI microservice, a small feature-engineering example, and baseline model training scaffolding.
 
@@ -23,14 +23,14 @@ pip install -r requirements.txt
 .\run_setup.bat
 ```
 
-2. Start the API:
+2. Start the local dashboard:
 
 ```powershell
-.\run_api.bat
-# then open http://127.0.0.1:8000/health
+.\run_dashboard.bat
+# then open http://127.0.0.1:8501
 ```
 
-3. Run the scraper (after configuring `scraper_incremental.base_url` to a real HKJC listing page):
+3. Or run the command-line scraper. It uses the current HKJC results listing by default; `SCRAPER_BASE_URL` can override it in `.env`:
 
 ```powershell
 .\run_scraper.bat
@@ -38,29 +38,28 @@ pip install -r requirements.txt
 
 ## Dashboard (recommended)
 
-A small Flask dashboard is included to control scraping, preview results, and download CSVs.
+A Flask dashboard is included to control scraping, preview CSV results, and download CSV or JSON exports.
 
-1. Activate your virtual environment and install requirements if needed:
+1. Start the dashboard launcher after setup:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+.\run_dashboard.bat
 ```
 
-2. Run the dashboard:
+Or start it manually:
 
 ```powershell
 python dashboard.py
 # Open http://127.0.0.1:8501 in your browser
 ```
 
-Notes:
-- By default CSV outputs are saved under the `output/` folder in the repository root.
-- The dashboard runs the scraper in a background thread, shows a progress bar and live log, and provides a combined CSV download when the job finishes.
+Choose a date range, Sha Tin and/or Happy Valley, CSV and/or JSON, then combined or per-day files. The main CSV contains the race, runner, sectionals, dividends, final odds, and date-matched historical weather fields (racecourse station + HKO Observatory) in one file. Sectionals and dividends are stored as JSON text in the relevant CSV cells so each runner remains one row. JSON exports retain the full nested structure. Exports are saved under `output/`; the command-line scraper also writes race JSON under `data/`.
+
+Weather is joined by meeting date from two HKO sources. The `Venue*` columns come from the HKO station at the racecourse itself (SHA = Sha Tin, HPV = Happy Valley): daily maximum/minimum temperature from the Weather and Radiation Level bulletin (published ~01:30 the next day, so available to yesterday) and daily mean temperature from the climate dataset (loads with a ~1-month lag). The `Weather*` columns are the Hong Kong Observatory headquarters daily extract (mean pressure, temperatures, dew point, humidity, cloud, rainfall) kept as a city-wide reference. Both are whole-day values for the meeting date at their station, not race-time readings; dates not yet published remain blank. Do not use full-day weather summaries or post-race odds as pre-race prediction features: they are not available at the time of betting.
 
 ## Ingesting scraped data into PostgreSQL
 1. Configure your Postgres connection in `.env`: set `DATABASE_URL` to a valid `postgresql+psycopg2://user:pass@host:port/dbname` string.
-2. The API batch will attempt to connect and automatically run an ingestion step before starting the server. If the DB is not reachable the API will still start but without data.
+2. The API is optional and can be started manually with `.venv\Scripts\python.exe -m uvicorn api:app --host 127.0.0.1 --port 8000`. Database-backed API features require a reachable PostgreSQL server.
 
 To run ingestion manually:
 
@@ -72,10 +71,25 @@ python ingest.py     # ingests all JSON files from data/ into Postgres
 
 If ingestion fails, check that Postgres is running and `.env` is configured correctly.
 
-## Notes & next steps
-- The scraper currently saves raw race JSON files in `data/` and maintains `mappings/entity_mappings.json` for canonical IDs.
-- The ingestion process is idempotent and uses `ON CONFLICT DO NOTHING` to avoid duplicates.
-- This repo is an evolving prototype — the scraping selectors, data model, and feature pipeline need further refinement for production use.
+## Features and predictions
+After scraping enough completed races, build a baseline model with:
+
+```powershell
+python models_baseline.py
+```
+
+The model uses historical starts, wins, draw, weights and race distance. It excludes the current result, finishing time, margin and odds from features. `POST /predict` requires a saved `model.pkl`, an initialized database and runners for the requested race. Predictions are only useful before a race if pre-race entries are available; the current results scraper discovers runners from completed race pages.
+
+## Data to scrape next
+- Pre-race race cards: declared runners, draw, carried weight, jockey, trainer, equipment and official ratings. This is the key addition needed for genuine pre-race predictions.
+- Horse, jockey and trainer profiles: age/sex/pedigree and historical performance, with stable source IDs and careful entity matching.
+- Sectional times and running positions are included from HKJC's sectional-time pages, including per-section positions and margins behind the leader.
+- Race incidents and veterinary/steward notes: available from the race reports and helpful for explaining unusual outcomes.
+- Dividends and final win odds are included from the result pages. Initial odds are not present in the verified results source and still need a historical odds feed.
+- Track surface/rail details are included where present on results. Historical weather is matched by date from HKO observations, including the station at each racecourse (daily max/min/mean temperature); race-time weather is not published historically by HKO for these stations.
+- Gear and jockey claim allowance are race-card fields not present in the verified historical result rows; they remain unavailable until a reliable race-card source is added.
+
+Keep requests rate-limited and respect HKJC terms and access restrictions. The scraper does not bypass authentication or anti-bot controls.
 
 ## Files not to commit
 Do not commit the following to GitHub — they are generated, environment-specific, or contain sensitive data:

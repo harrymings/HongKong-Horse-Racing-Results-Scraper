@@ -1,158 +1,338 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Racing Scraper Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>body{padding:18px}</style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HKJC Results Desk</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1d2b26;
+        --muted: #67766f;
+        --pine: #174b3b;
+        --leaf: #b5ce73;
+        --clay: #c96549;
+        --paper: #f3f4ed;
+        --line: #d8ddd3;
+        --white: #fff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background-color: var(--paper);
+        background-image: linear-gradient(rgba(23, 75, 59, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(23, 75, 59, .035) 1px, transparent 1px);
+        background-size: 28px 28px;
+        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      }
+      button, input, select { font: inherit; }
+      .shell { max-width: 1180px; margin: 0 auto; padding: 28px 22px 60px; }
+      .masthead { display: flex; justify-content: space-between; align-items: end; gap: 20px; padding: 10px 0 24px; border-bottom: 1px solid var(--line); }
+      .eyebrow { margin: 0 0 8px; color: var(--pine); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+      h1 { margin: 0; font: 700 34px/1.05 Georgia, "Times New Roman", serif; letter-spacing: 0; }
+      .masthead-mark { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+      .export-shortcut { display: inline-block; margin-top: 16px; color: var(--pine); font-weight: 700; }
+      .mark { width: 12px; height: 12px; background: var(--clay); border-radius: 50%; box-shadow: 7px 0 0 var(--leaf); margin-right: 7px; }
+      .notice { margin: 18px 0 0; padding: 12px 14px; border-left: 4px solid var(--clay); background: #fff7f2; }
+      .workbench { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); gap: 24px; margin-top: 24px; }
+      .panel { background: var(--white); border: 1px solid var(--line); border-radius: 6px; }
+      .panel-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+      .panel-head h2 { margin: 0; font: 700 21px/1.15 Georgia, "Times New Roman", serif; }
+      .panel-body { padding: 20px; }
+      .field-label, legend { display: block; margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+      .date-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      input[type="date"], select { width: 100%; min-height: 42px; padding: 8px 10px; color: var(--ink); background: #fbfcf8; border: 1px solid var(--line); border-radius: 4px; }
+      fieldset { min-width: 0; margin: 20px 0 0; padding: 0; border: 0; }
+      .choice-row { display: flex; flex-wrap: wrap; gap: 8px; }
+      .choice { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 4px; background: #fbfcf8; cursor: pointer; }
+      .choice:has(input:checked) { border-color: var(--pine); box-shadow: inset 0 0 0 1px var(--pine); background: #f2f7ed; }
+      input[type="checkbox"], input[type="radio"] { accent-color: var(--pine); }
+      .select-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      .action-row { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; }
+      .button { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 9px 14px; color: var(--white); background: var(--pine); border: 1px solid var(--pine); border-radius: 4px; text-decoration: none; font-weight: 700; cursor: pointer; }
+      .button:hover { background: #0f392c; }
+      .button.secondary { color: var(--ink); background: var(--white); border-color: var(--line); }
+      .button.stop { color: #7d3324; background: #fff5f1; border-color: #e5b4a4; }
+      .button:disabled { opacity: .48; cursor: not-allowed; }
+      .status-line { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 9px; font-size: 13px; }
+      .progress-track { height: 10px; overflow: hidden; background: #e9ede5; border-radius: 2px; }
+      .progress-fill { width: 0; height: 100%; background: var(--leaf); transition: width .25s ease; }
+      .download-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+      .log { min-height: 185px; max-height: 300px; overflow: auto; padding: 12px; color: #e9f1e8; background: #1b2924; border-radius: 4px; font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; }
+      .section { margin-top: 24px; }
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--line); }
+      th { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+      .exports-table { table-layout: fixed; }
+      .exports-table .select-col { width: 4%; text-align: center; }
+      .exports-table th:nth-child(2) { width: 42%; }
+      .exports-table th:nth-child(3) { width: 10%; }
+      .exports-table th:nth-child(4) { width: 19%; }
+      .exports-table th:nth-child(5) { width: 25%; }
+      .export-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+      .export-toolbar .button { min-height: 36px; padding: 7px 12px; }
+      .toolbar-hint { color: var(--muted); font-size: 12px; }
+      .exports-table td { overflow-wrap: anywhere; }
+      .file-actions .button { min-height: 34px; padding: 6px 10px; margin: 2px 5px 2px 0; }
+      .empty { padding: 18px 14px; color: var(--muted); }
+      .weather-note { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+      .weather-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+      .preview-panel { width: 100%; max-height: 430px; overflow: auto; background: #f7f9f3; }
+      .preview-summary { margin: 0; padding: 12px 14px; color: var(--pine); font-size: 13px; font-weight: 700; }
+      .preview-panel table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
+      .preview-panel th { position: sticky; top: 0; z-index: 1; background: #e8eee5; }
+      .preview-panel th, .preview-panel td { white-space: nowrap; overflow-wrap: normal; }
+      @media (max-width: 760px) {
+        .shell { padding: 18px 14px 36px; }
+        .masthead { align-items: start; flex-direction: column; }
+        h1 { font-size: 29px; }
+        .workbench { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 440px) {
+        .date-grid, .select-grid { grid-template-columns: 1fr; }
+        .panel-body { padding: 15px; }
+        .button { width: 100%; }
+      }
+    </style>
   </head>
   <body>
-    <div class="container">
-      <h1 class="mb-3">Racing Scraper Dashboard</h1>
+    <main class="shell">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">Hong Kong Jockey Club · Results archive</p>
+          <h1>HKJC Results Desk</h1>
+        </div>
+        <div class="masthead-mark"><span class="mark" aria-hidden="true"></span> Local race results</div>
+      </header>
+      <a class="export-shortcut" href="#saved-exports">Saved exports ({{ exports|length }}) ↓</a>
+
       {% with messages = get_flashed_messages() %}
-        {% if messages %}
-          <div class="alert alert-info">{{ messages[0] }}</div>
-        {% endif %}
+        {% if messages %}<div class="notice" role="status">{{ messages[0] }}</div>{% endif %}
       {% endwith %}
 
-      <div class="card mb-3">
-        <div class="card-body">
-          <form id="start-form" method="post" action="/run" class="row g-2 align-items-end">
-            <div class="col-auto">
-              <label class="form-label">Start</label>
-              <input class="form-control" type="date" name="start_date" value="{{ default_start }}">
-            </div>
-            <div class="col-auto">
-              <label class="form-label">End</label>
-              <input class="form-control" type="date" name="end_date" value="{{ default_end }}">
-            </div>
-            <div class="col-auto">
-              <label class="form-label">Output</label>
-              <div>
-                <div class="form-check form-check-inline">
-                  <input class="form-check-input" type="radio" name="output_mode" id="out_single" value="single" checked>
-                  <label class="form-check-label" for="out_single">Single CSV (default)</label>
-                </div>
-                <div class="form-check form-check-inline">
-                  <input class="form-check-input" type="radio" name="output_mode" id="out_separate" value="separate">
-                  <label class="form-check-label" for="out_separate">Separate per-day CSVs</label>
-                </div>
+      <div class="workbench">
+        <section class="panel" aria-labelledby="query-heading">
+          <div class="panel-head"><h2 id="query-heading">Build a data export</h2></div>
+          <div class="panel-body">
+            <form id="start-form" method="post" action="/run">
+              <div class="date-grid">
+                <label><span class="field-label">From</span><input type="date" name="start_date" value="{{ default_start }}" required></label>
+                <label><span class="field-label">Through</span><input type="date" name="end_date" value="{{ default_end }}" required></label>
               </div>
-            </div>
-            <div class="col-auto">
-              <button id="start-btn" class="btn btn-primary">Start Scrape</button>
-            </div>
-            <div class="col-auto">
-              <button id="stop-btn" class="btn btn-warning" type="button" disabled>Stop</button>
-            </div>
-            <div class="col-auto">
-              <button class="btn btn-secondary" id="refresh-files" type="button">Refresh Files</button>
-            </div>
-          </form>
 
-          <div class="mt-3">
-            <div class="progress" style="height:22px">
-              <div id="progress-bar" class="progress-bar" role="progressbar" style="width:0%">Idle</div>
-            </div>
-            <div class="mt-2"><small id="progress-text"></small></div>
-            <div class="mt-2">
-              <a id="download-link" class="btn btn-success btn-sm" href="#" style="display:none">Download Combined CSV</a>
-            </div>
+              <fieldset>
+                <legend>Racecourse</legend>
+                <div class="choice-row">
+                  <label class="choice"><input type="checkbox" name="courses" value="ST" checked> Sha Tin</label>
+                  <label class="choice"><input type="checkbox" name="courses" value="HV" checked> Happy Valley</label>
+                </div>
+              </fieldset>
+
+              <div class="select-grid">
+                <fieldset>
+                  <legend>File format</legend>
+                  <select name="output_format">
+                    <option value="csv" selected>CSV spreadsheet</option>
+                    <option value="json">JSON records</option>
+                    <option value="both">CSV and JSON</option>
+                  </select>
+                </fieldset>
+                <fieldset>
+                  <legend>File grouping</legend>
+                  <select name="output_mode">
+                    <option value="single" selected>One combined file</option>
+                    <option value="separate">Separate files by date</option>
+                  </select>
+                </fieldset>
+              </div>
+
+              <div class="action-row">
+                <button id="start-btn" class="button" type="submit">Start scrape</button>
+                <button id="stop-btn" class="button stop" type="button" disabled>Stop job</button>
+                <button class="button secondary" id="refresh-files" type="button">Refresh exports</button>
+              </div>
+              <p class="weather-note">Weather is matched to each meeting date using HKO daily observations, not race-time or racecourse measurements. Missing dates stay blank. Initial odds, gear, and jockey claims are not available in the results source.</p>
+            </form>
           </div>
-        </div>
+        </section>
+
+        <section class="panel" aria-labelledby="job-heading">
+          <div class="panel-head"><h2 id="job-heading">Scrape job</h2></div>
+          <div class="panel-body">
+            <div class="status-line"><strong id="job-state">Idle</strong><span id="progress-text"></span></div>
+            <div class="progress-track" role="progressbar" aria-label="Scrape progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="progress-bar" class="progress-fill"></div>
+            </div>
+            <div id="download-links" class="download-list" {% if latest_export %}data-latest-file="{{ latest_export.name }}" data-latest-time="{{ latest_export.generated_at }}"{% endif %}></div>
+            <fieldset>
+              <legend>Activity</legend>
+              <pre id="log" class="log" aria-live="polite">Waiting for a scrape job.</pre>
+            </fieldset>
+          </div>
+        </section>
       </div>
 
-      <!-- Merge functionality removed for a simpler UI -->
-
-      <style>
-        /* Minimal, modern tweaks */
-        body { background: #f4f6f8; }
-        .card { border: none; border-radius: 12px; box-shadow: 0 6px 18px rgba(15,23,42,0.06); }
-        .btn-primary { background: linear-gradient(90deg,#4f46e5,#06b6d4); border: none; }
-        .btn-warning { background:#f59e0b; border:none }
-      </style>
-
-      <div class="card mb-3">
-        <div class="card-body">
-          <h5>CSV Files</h5>
-          <div id="files-area">
-            {% if csv_files %}
-              <table class="table table-sm">
-                <thead><tr><th>Filename</th><th>Actions</th></tr></thead>
+      <section class="panel section" aria-labelledby="exports-heading" id="saved-exports">
+        <div class="panel-head"><h2 id="exports-heading">Saved exports ({{ exports|length }})</h2></div>
+        <p class="weather-note" style="padding: 12px 14px 0; margin: 0;">Each row is a saved download. Overlapping date ranges can contain the same races; CSV and JSON are alternative formats.</p>
+        <div class="table-wrap">
+          {% if exports %}
+            <form method="POST" action="{{ url_for('delete_files') }}" onsubmit="return confirm('Delete the selected file(s) from output/? This cannot be undone.');">
+              <div class="export-toolbar">
+                <button class="button stop" type="submit">Delete selected</button>
+                <span class="toolbar-hint">Tick the rows to remove, then delete. CSV and JSON are deleted independently.</span>
+              </div>
+              <table class="exports-table">
+                <thead><tr><th class="select-col"><input type="checkbox" id="select-all" aria-label="Select all files"></th><th>Race date range and file</th><th>Format</th><th>File saved at (local)</th><th>Actions</th></tr></thead>
                 <tbody>
-                {% for f in csv_files %}
-                <tr>
-                  <td>{{ f }}</td>
-                  <td>
-                    <a class="btn btn-outline-primary btn-sm" href="/preview?file={{ f }}">Preview</a>
-                    <a class="btn btn-outline-secondary btn-sm" href="/download/{{ f }}">Download</a>
-                  </td>
-                </tr>
-                {% endfor %}
+                  {% for export in exports %}
+                    <tr>
+                      <td class="select-col"><input type="checkbox" name="filenames" value="{{ export.name }}" aria-label="Select {{ export.name }}"></td>
+                      <td>{{ export.scope }}<br><small>{{ export.name }}</small></td>
+                      <td>{{ export.name.rsplit('.', 1)[-1]|upper }}</td>
+                      <td>{{ export.generated_at }}</td>
+                      <td class="file-actions">
+                        {% if export.name.endswith('.csv') %}<button class="button secondary preview-toggle" type="button" data-preview-file="{{ export.name }}" aria-expanded="false">Preview</button>{% endif %}
+                        <a class="button secondary" href="{{ url_for('download', filename=export.name) }}">Download</a>
+                      </td>
+                    </tr>
+                    {% if export.name.endswith('.csv') %}
+                      <tr class="preview-row" hidden><td colspan="5"><div class="preview-panel" aria-live="polite">Select Preview to load rows.</div></td></tr>
+                    {% endif %}
+                  {% endfor %}
                 </tbody>
               </table>
-            {% else %}
-              <div>No CSV files yet.</div>
-            {% endif %}
-          </div>
+            </form>
+          {% else %}
+            <div class="empty">No exports have been created yet.</div>
+          {% endif %}
         </div>
-      </div>
-
-      <div class="card">
-        <div class="card-body">
-          <h5>Live log</h5>
-          <pre id="log" style="height:200px;overflow:auto;background:#f8f9fa;padding:8px"></pre>
-        </div>
-      </div>
-    </div>
+      </section>
+    </main>
 
     <script>
-      async function fetchStatus(){
-        try{
-          const res = await fetch('/status');
-          const j = await res.json();
+      let wasRunning = false;
+      async function fetchStatus() {
+        try {
+          const response = await fetch('/status');
+          const status = await response.json();
           const bar = document.getElementById('progress-bar');
-          const txt = document.getElementById('progress-text');
-          const log = document.getElementById('log');
-          const startBtn = document.getElementById('start-btn');
-          const stopBtn = document.getElementById('stop-btn');
-          const dl = document.getElementById('download-link');
-          if(j.running){
-            const pct = j.total? Math.round((j.done/j.total)*100):0;
-            bar.style.width = pct + '%';
-            bar.textContent = pct + '%';
-            bar.classList.remove('bg-success');
-            bar.classList.add('bg-info');
-            txt.textContent = `Scraping ${j.current} — ${j.done}/${j.total}`;
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
-            dl.style.display = 'none';
-          } else {
-            bar.style.width = '100%';
-            bar.classList.remove('bg-info');
-            bar.classList.add('bg-success');
-            bar.textContent = j.output_file? 'Finished' : 'Idle';
-            txt.textContent = j.output_file? `Output: ${j.output_file}` : '';
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            if(j.output_file){
-              dl.href = '/download/' + j.output_file;
-              dl.style.display = 'inline-block';
-            } else {
-              dl.style.display = 'none';
-            }
+          const progress = bar.parentElement;
+          const start = document.getElementById('start-btn');
+          const stop = document.getElementById('stop-btn');
+          const state = document.getElementById('job-state');
+          const links = document.getElementById('download-links');
+          const percent = status.total ? Math.round(status.done / status.total * 100) : 0;
+
+          bar.style.width = `${percent}%`;
+          progress.setAttribute('aria-valuenow', String(percent));
+          state.textContent = status.running ? 'Running' : (status.error ? 'Failed' : (status.done ? (status.downloads.length ? 'Complete' : 'No exports for selected dates') : 'Idle'));
+          document.getElementById('progress-text').textContent = status.running
+            ? `${status.current} · ${status.done}/${status.total} dates`
+            : (status.total ? `${status.done}/${status.total} dates` : '');
+          document.getElementById('log').textContent = status.log.join('\n') || 'Waiting for a scrape job.';
+          start.disabled = status.running;
+          stop.disabled = !status.running;
+          links.replaceChildren();
+          for (const filename of status.downloads) {
+            const link = document.createElement('a');
+            link.className = 'button';
+            link.href = `/download/${encodeURIComponent(filename)}`;
+            link.textContent = `Download ${filename}`;
+            links.append(link);
           }
-          log.textContent = j.log.join('\n');
-        }catch(e){
-          console.error(e);
+          if (!status.running && !status.downloads.length && links.dataset.latestFile) {
+            const latest = document.createElement('a');
+            latest.className = 'button';
+            latest.href = `/download/${encodeURIComponent(links.dataset.latestFile)}`;
+            latest.textContent = `${status.error ? 'Previous export' : 'Latest export'} · ${links.dataset.latestTime}`;
+            links.append(latest);
+          }
+          if (!status.running && (status.downloads.length || links.dataset.latestFile)) {
+            const view = document.createElement('a');
+            view.className = 'button secondary';
+            view.href = '#saved-exports';
+            view.textContent = 'View saved exports';
+            links.append(view);
+          }
+          if (wasRunning && !status.running) {
+            window.location.reload();
+            return;
+          }
+          wasRunning = status.running;
+        } catch (error) {
+          document.getElementById('job-state').textContent = 'Status unavailable';
         }
       }
-      setInterval(fetchStatus,1000);
-      document.getElementById('refresh-files').addEventListener('click', ()=> location.reload());
-      document.getElementById('stop-btn').addEventListener('click', async ()=>{
-        await fetch('/stop', {method:'POST'});
+      document.getElementById('refresh-files').addEventListener('click', () => window.location.reload());
+      const selectAll = document.getElementById('select-all');
+      if (selectAll) {
+        selectAll.addEventListener('change', () => {
+          document.querySelectorAll('input[name="filenames"]').forEach(box => { box.checked = selectAll.checked; });
+        });
+      }
+      document.querySelectorAll('.preview-toggle').forEach(button => {
+        button.addEventListener('click', async () => {
+          const previewRow = button.closest('tr').nextElementSibling;
+          const expanded = button.getAttribute('aria-expanded') === 'true';
+          button.setAttribute('aria-expanded', String(!expanded));
+          button.textContent = expanded ? 'Preview' : 'Hide preview';
+          previewRow.hidden = expanded;
+          if (expanded) return;
+
+          const panel = previewRow.querySelector('.preview-panel');
+          if (panel.dataset.loaded === 'true') return;
+          panel.textContent = 'Loading preview...';
+          try {
+            const response = await fetch(`/preview/data?file=${encodeURIComponent(button.dataset.previewFile)}`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Preview unavailable');
+            const table = document.createElement('table');
+            const head = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            const labels = { VenueWeatherStation: 'Racecourse station', VenueMaxTempC: 'Venue max (°C)', VenueMinTempC: 'Venue min (°C)', VenueMeanTempC: 'Venue mean (°C)', VenueWeatherStatus: 'Venue weather', WeatherMeanTempC: 'HKO mean temp (°C)', WeatherRainfallMm: 'HKO rain (mm)', WeatherMeanCloudPct: 'HKO cloud cover (%)', WeatherStatus: 'HKO weather status', FinalWinOdds: 'Final odds' };
+            for (const column of data.columns) {
+              const cell = document.createElement('th');
+              cell.textContent = labels[column] || column;
+              headerRow.append(cell);
+            }
+            head.append(headerRow);
+            table.append(head);
+            const body = document.createElement('tbody');
+            for (const record of data.rows) {
+              const row = document.createElement('tr');
+              for (const column of data.columns) {
+                const cell = document.createElement('td');
+                cell.textContent = record[column] == null ? '' : String(record[column]);
+                row.append(cell);
+              }
+              body.append(row);
+            }
+            table.append(body);
+            const summary = document.createElement('p');
+            summary.className = 'preview-summary';
+            const first = data.rows.find(r => r.VenueMaxTempC != null) || data.rows.find(r => r.WeatherMeanTempC != null);
+            if (first && first.VenueMaxTempC != null) {
+              const mean = first.VenueMeanTempC != null ? ` / ${first.VenueMeanTempC}°C mean` : '';
+              summary.textContent = `${first.MeetDate} · ${first.VenueWeatherStation} racecourse station (daily): ${first.VenueMaxTempC}°C max / ${first.VenueMinTempC}°C min${mean}`;
+            } else if (first && first.WeatherMeanTempC != null) {
+              summary.textContent = `${first.MeetDate} · HKO daily: ${first.WeatherMeanTempC} °C mean · ${first.WeatherRainfallMm ?? 'n/a'} mm rain · ${first.WeatherMeanCloudPct ?? 'n/a'}% mean cloud cover`;
+            } else {
+              summary.textContent = 'No racecourse-station or HKO daily weather for the first previewed race.';
+            }
+            panel.replaceChildren(summary, table);
+            panel.dataset.loaded = 'true';
+          } catch (error) {
+            panel.textContent = `Preview unavailable: ${error.message}`;
+          }
+        });
+      });
+      document.getElementById('stop-btn').addEventListener('click', async () => {
+        await fetch('/stop', { method: 'POST' });
         fetchStatus();
       });
+      setInterval(fetchStatus, 1000);
       fetchStatus();
     </script>
   </body>

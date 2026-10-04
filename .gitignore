@@ -20,6 +20,11 @@ model.pkl
 /output/
 races_*.csv
 
+# Local runtime logs
+dashboard_stdout.log
+dashboard_stderr.log
+*.log
+
 # IDEs
 .vscode/
 *.suo

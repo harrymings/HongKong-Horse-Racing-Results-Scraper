@@ -6,5 +6,5 @@ if not exist ".venv\Scripts\activate.bat" (
     exit /b 1
 )
 call .venv\Scripts\activate.bat
-python scraper_incremental.py
+python scraper_incremental.py %*
 pause

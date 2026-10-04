@@ -2,7 +2,7 @@
 -- Designed for PostgreSQL / DuckDB compatibility
 
 -- Core entities
-CREATE TABLE horses (
+CREATE TABLE IF NOT EXISTS horses (
     horse_id        TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
     country         TEXT,
@@ -11,21 +11,21 @@ CREATE TABLE horses (
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE trainers (
+CREATE TABLE IF NOT EXISTS trainers (
     trainer_id      TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
     country         TEXT,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE jockeys (
+CREATE TABLE IF NOT EXISTS jockeys (
     jockey_id       TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
     country         TEXT,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE races (
+CREATE TABLE IF NOT EXISTS races (
     race_id         TEXT PRIMARY KEY,
     meeting_date    DATE NOT NULL,
     meeting_name    TEXT,
@@ -41,7 +41,7 @@ CREATE TABLE races (
     scraped_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE runners (
+CREATE TABLE IF NOT EXISTS runners (
     runner_id       TEXT PRIMARY KEY,
     race_id         TEXT REFERENCES races(race_id) ON DELETE CASCADE,
     horse_id        TEXT REFERENCES horses(horse_id),
@@ -49,9 +49,12 @@ CREATE TABLE runners (
     jockey_id       TEXT REFERENCES jockeys(jockey_id),
     draw            INTEGER,
     weight_carried  REAL,
+    declared_weight REAL,
     finishing_pos   INTEGER,
     finishing_time  REAL,
     margin          REAL,
+    running_position TEXT,
+    win_odds        REAL,
     official_rating INTEGER,
     equipment       TEXT,
     vet_comment     TEXT,
@@ -59,8 +62,12 @@ CREATE TABLE runners (
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE runners ADD COLUMN IF NOT EXISTS declared_weight REAL;
+ALTER TABLE runners ADD COLUMN IF NOT EXISTS running_position TEXT;
+ALTER TABLE runners ADD COLUMN IF NOT EXISTS win_odds REAL;
+
 -- Odds history snapshots (multiple per runner per race)
-CREATE TABLE odds_history (
+CREATE TABLE IF NOT EXISTS odds_history (
     odds_id         TEXT PRIMARY KEY,
     race_id         TEXT REFERENCES races(race_id) ON DELETE CASCADE,
     runner_id       TEXT REFERENCES runners(runner_id),
@@ -74,7 +81,7 @@ CREATE TABLE odds_history (
 );
 
 -- Sectional times (multiple sections per runner)
-CREATE TABLE sectional_times (
+CREATE TABLE IF NOT EXISTS sectional_times (
     id              TEXT PRIMARY KEY,
     race_id         TEXT REFERENCES races(race_id) ON DELETE CASCADE,
     runner_id       TEXT REFERENCES runners(runner_id),
@@ -84,7 +91,7 @@ CREATE TABLE sectional_times (
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE weather (
+CREATE TABLE IF NOT EXISTS weather (
     id              TEXT PRIMARY KEY,
     race_id         TEXT REFERENCES races(race_id) ON DELETE CASCADE,
     temperature_c   REAL,
@@ -94,7 +101,7 @@ CREATE TABLE weather (
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE track_bias (
+CREATE TABLE IF NOT EXISTS track_bias (
     id              TEXT PRIMARY KEY,
     venue           TEXT,
     reference_date  DATE,
@@ -103,7 +110,7 @@ CREATE TABLE track_bias (
 );
 
 -- Entity mapping tables to canonicalize names and provide stable IDs
-CREATE TABLE entity_mappings (
+CREATE TABLE IF NOT EXISTS entity_mappings (
     canonical_id    TEXT PRIMARY KEY,
     entity_type     TEXT NOT NULL,
     canonical_name  TEXT NOT NULL,
@@ -113,9 +120,9 @@ CREATE TABLE entity_mappings (
 );
 
 -- Basic indexes for performance
-CREATE INDEX idx_races_meeting_date ON races (meeting_date);
-CREATE INDEX idx_runners_race_id ON runners (race_id);
-CREATE INDEX idx_odds_history_race_time ON odds_history (snapshot_time);
+CREATE INDEX IF NOT EXISTS idx_races_meeting_date ON races (meeting_date);
+CREATE INDEX IF NOT EXISTS idx_runners_race_id ON runners (race_id);
+CREATE INDEX IF NOT EXISTS idx_odds_history_race_time ON odds_history (snapshot_time);
 
 -- Notes:
 -- - Use deterministic stable ID generation (e.g. hash of name+dob/source) when ingesting

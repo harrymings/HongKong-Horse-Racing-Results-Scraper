@@ -17,15 +17,20 @@ def compute_rolling_winrate(runners_df: pl.DataFrame, window: int = 50) -> pl.Da
     if window < 1:
         raise ValueError("window must be at least 1")
 
-    df = runners_df.sort(["horse_id", "race_date", "race_id"] if "race_id" in runners_df.columns else ["horse_id", "race_date"])
-    df = df.with_columns(
-        pl.when(pl.col("finishing_pos") == 1).then(1).otherwise(0).cast(pl.Int8).alias("is_win")
-    )
-    return df.with_columns(
-        pl.int_range(pl.len()).over("horse_id").alias("starts_before"),
-        pl.col("is_win").shift(1).rolling_sum(window_size=window, min_samples=1).over("horse_id").fill_null(0).alias(f"win_sum_{window}"),
-        pl.col("is_win").shift(1).rolling_mean(window_size=window, min_samples=1).over("horse_id").fill_null(0.0).alias(f"win_rate_{window}"),
-    )
+    # Only earlier meeting dates enter history. Same-day starts cannot leak across rows.
+    import pandas as pd
+    frame = pd.DataFrame(runners_df.to_dicts()).sort_values(["horse_id", "race_date"])
+    rows=[]
+    for horse, group in frame.groupby("horse_id", sort=False):
+        history=[]
+        for day, daily in group.groupby("race_date", sort=True):
+            prior=history[-window:]
+            for record in daily.to_dict("records"):
+                record.update(is_win=int(record.get("finishing_pos")==1),starts_before=len(history),
+                              **{f"win_sum_{window}":sum(prior), f"win_rate_{window}":sum(prior)/len(prior) if prior else 0.})
+                rows.append(record)
+            history.extend(int(p==1) for p in daily["finishing_pos"].dropna())
+    return pl.DataFrame(rows)
 
 
 def example_pipeline() -> Optional[pl.DataFrame]:

@@ -12,6 +12,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 from dotenv import load_dotenv
 from entity_resolution import map_entity
+from persistence import atomic_json, save_race
+from fractions import Fraction
 
 # Load .env if present
 load_dotenv()
@@ -35,7 +37,7 @@ def _load_checkpoint():
 
 
 def _save_checkpoint(state: Dict):
-    CHECKPOINT.write_text(json.dumps(state))
+    atomic_json(CHECKPOINT, state)
 
 
 def deterministic_runner_id(race_id: str, horse_name: str) -> str:
@@ -72,22 +74,24 @@ def _as_float(value: str):
         return None
 
 
-def _margin_in_lengths(value: str):
-    text = value.strip().lower()
-    if not text:
-        return None
-    if text == "-":
-        return 0.0
-    named_margins = {"n": 0.05, "nose": 0.05, "short head": 0.1, "sh": 0.1, "head": 0.2, "hd": 0.2, "neck": 0.25}
-    if text in named_margins:
-        return named_margins[text]
-    match = re.fullmatch(r"(\d+(?:\.\d+)?)(?:-(\d+)/(\d+))?", text)
-    if not match:
-        return None
-    result = float(match.group(1))
-    if match.group(2) and int(match.group(3)):
-        result += int(match.group(2)) / int(match.group(3))
-    return result
+def _margin_in_lengths(value: str, finishing_pos=None):
+    text = (value or "").strip().lower().replace("−", "-").replace("–", "-")
+    if text in {"", "-", "---"}:
+        return 0.0 if finishing_pos == 1 and text else None
+    names = {"n": .05, "nose": .05, "sh": .1, "short head": .1,
+             "hd": .2, "head": .2, "nk": .25, "neck": .25}
+    if text in names:
+        return names[text]
+    text = re.sub(r"\s*/\s*", "/", text)
+    try:
+        mixed = re.fullmatch(r"(\d+)\s*[- ]\s*(\d+/\d+)", text)
+        if mixed:
+            return float(int(mixed[1]) + Fraction(mixed[2]))
+        if re.fullmatch(r"\d+/\d+|\d+(?:\.\d+)?", text):
+            return float(Fraction(text))
+    except (ValueError, ZeroDivisionError):
+        pass
+    return None
 
 
 def _finish_time_seconds(value: str):
@@ -96,15 +100,113 @@ def _finish_time_seconds(value: str):
         return None
     minutes = int(match.group(1) or 0)
     seconds = int(match.group(2))
+    if match.group(1) and seconds >= 60:
+        return None
     fraction = float(f"0.{match.group(3)}") if match.group(3) else 0.0
     return minutes * 60 + seconds + fraction
 
 
-def _result_rows(soup: BeautifulSoup):
-    for row in soup.select("table tr"):
-        cells = [cell.get_text(" ", strip=True) for cell in row.select("th, td")]
-        if len(cells) >= 12 and cells[1].isdigit() and cells[2]:
-            yield row, cells
+class RaceParseError(ValueError):
+    pass
+
+
+RESULT_HEADERS = [
+    {"pla", "placing"}, {"horseno", "horsenumber"}, {"horse"}, {"jockey"}, {"trainer"},
+    {"actwt", "actualweight"}, {"declarhorsewt", "declaredhorseweight", "ondatehorseweight"},
+    {"dr", "draw"}, {"lbw", "lengthbehindwinner"}, {"runningposition"}, {"finishtime"}, {"winodds"},
+]
+
+
+def _visible_cells(row):
+    return [c for c in row.find_all(["th", "td"], recursive=False)
+            if not c.has_attr("hidden") and c.get("aria-hidden") != "true"
+            and not re.search(r"display\s*:\s*none", c.get("style", ""), re.I)]
+
+
+def _header_key(text):
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _result_rows(soup):
+    matches = []
+    for table in soup.select("table"):
+        for row in table.select("tr"):
+            if row.find_parent("table") is not table:
+                continue
+            cells = _visible_cells(row)
+            keys = [{_header_key(c.get_text(" ", strip=True)), _header_key(c.get("title", ""))} for c in cells]
+            columns = [next((i for i, key in enumerate(keys) if key & aliases), None) for aliases in RESULT_HEADERS]
+            if all(i is not None for i in columns):
+                matches.append((table, row, columns))
+                break
+    if len(matches) != 1:
+        raise RaceParseError(f"Expected one official result table, found {len(matches)}")
+    table, header, columns = matches[0]
+    seen = set()
+    for row in table.select("tr"):
+        if row is header or row.find_parent("table") is not table or row.find_parent("thead"):
+            continue
+        cells = _visible_cells(row)
+        if not cells or not any(c.get_text(strip=True) for c in cells):
+            continue
+        if len(cells) <= max(columns) or any(int(c.get("rowspan", 1)) > 1 for c in cells):
+            raise RaceParseError("Unsupported result row structure; refusing positional guesses")
+        ordered = [cells[i] for i in columns]
+        texts = [c.get_text(" ", strip=True) for c in ordered]
+        if not texts[1].isdigit() or not texts[2]:
+            raise RaceParseError("Missing horse number or name in result table")
+        if int(texts[1]) in seen:
+            raise RaceParseError(f"Duplicate horse number {texts[1]}")
+        seen.add(int(texts[1]))
+        yield ordered, texts
+    if not seen:
+        raise RaceParseError("Official result table contains no runners")
+
+
+def _race_metadata(soup, race_number):
+    headers = [t for t in soup.select(".race_tab table")
+               if re.search(rf"\bRACE\s+{race_number}\b", t.get_text(" ", strip=True), re.I)]
+    if len(headers) != 1:
+        raise RaceParseError("Cannot identify the requested race metadata table")
+    table = headers[0]
+    rows = [r.find_all(["td", "th"], recursive=False) for r in table.select("tbody tr")]
+    label = distance = name = going = course = rating = None
+    for cells in rows:
+        if not cells:
+            continue
+        text = cells[0].get_text(" ", strip=True)
+        match = re.fullmatch(r"(.+?)\s*[-–]\s*(\d{3,4})\s*M(?:\s*[-–]\s*(.*))?", text, re.I)
+        if match:
+            label, distance, rating = match[1].strip(), int(match[2]), match[3]
+        if len(cells) >= 3:
+            field = cells[1].get_text(" ", strip=True).lower().strip(" :")
+            if field == "going":
+                going = cells[2].get_text(" ", strip=True)
+            if field == "course":
+                course = cells[2].get_text(" ", strip=True)
+                name = text
+    number = re.search(r"\bClass\s+(\d+)", label or "", re.I)
+    _, track, rail = _course_details("Course : " + (course or "") + " Time :")
+    return {"class_label": label, "grade": label, "class_number": int(number[1]) if number else None,
+            "restricted": "restricted" in (label or "").lower(), "distance_m": distance,
+            "rating_band": rating, "race_name": name, "going": going, "course_description": course,
+            "track_type": track, "rail_position": rail,
+            "parse_warnings": [] if label and distance else ["Missing race class/distance in race header"]}
+
+
+def _horse_code(text, link=None):
+    visible = re.search(r"\(([A-Z]\d{3,4})\)", text)
+    linked = re.search(r"(?:HK_\d{4}_)([A-Z]\d{3,4})", link or "", re.I)
+    if visible and linked and visible[1] != linked[1].upper():
+        raise RaceParseError("Visible horse code and source link disagree")
+    return visible[1] if visible else linked[1].upper() if linked else None
+
+
+def _finish_status(text):
+    if text.isdigit():
+        return "FINISHED"
+    return {"DNF": "DNF", "PU": "DNF", "DISQ": "DISQUALIFIED", "DQ": "DISQUALIFIED",
+            "WV": "SCRATCHED", "WV-A": "SCRATCHED", "W": "SCRATCHED"}.get(text.upper(), "UNKNOWN")
 
 
 def _course_details(page_text: str):
@@ -138,12 +240,18 @@ def _parse_dividends(soup: BeautifulSoup):
                 "pool": current_pool,
                 "winning_combination": combination_cell.get_text(" ", strip=True),
                 "dividend_hkd": _as_float(amount_cell.get_text(" ", strip=True)),
+                "dividend_text": amount_cell.get_text(" ", strip=True),
             })
         return dividends
     return []
 
 
-def _parse_sectionals(soup: BeautifulSoup):
+def _parse_sectionals(soup: BeautifulSoup, race_number=None):
+    if race_number is not None:
+        containers = soup.select(f"#Race{int(race_number)}")
+        if len(containers) != 1:
+            raise RaceParseError("Sectional race container missing or ambiguous")
+        soup = containers[0]
     for table in soup.select("table.race_table"):
         header_text = " ".join(table.select_one("thead").stripped_strings) if table.select_one("thead") else ""
         if "Running Position & Margin Behind Leader" not in header_text:
@@ -181,16 +289,16 @@ def _parse_sectionals(soup: BeautifulSoup):
                     "split_200m_texts": split_texts,
                     "split_200m_seconds": [_finish_time_seconds(value) for value in split_texts],
                 })
-            by_horse_number[int(horse_number_text)] = sectionals
+            number = int(horse_number_text)
+            if number in by_horse_number:
+                raise RaceParseError("Duplicate sectional horse number")
+            code = _horse_code(cells[2].get_text(" ", strip=True), str(cells[2]))
+            by_horse_number[number] = {"horse_code": code, "sections": sectionals}
         return by_horse_number
     return {}
 
 
 def _sectional_page_url(race_url: str, soup: BeautifulSoup, meeting_date: str, race_number: int):
-    for link in soup.select("a[href]"):
-        href = link.get("href", "")
-        if "displaysectionaltime" in href.lower():
-            return urljoin(race_url, href)
     parsed = urlparse(race_url)
     path = "/en-us/local/information/displaysectionaltime"
     query = urlencode({
@@ -201,12 +309,16 @@ def _sectional_page_url(race_url: str, soup: BeautifulSoup, meeting_date: str, r
 
 
 class IncrementalScraper:
-    def __init__(self, base_url: str, rate_limit: float = 1.0, max_retries: int = 3):
+    def __init__(self, base_url: str, rate_limit: float = 1.0, max_retries: int = 3, sectional_tolerance: float = 0.10):
         if not base_url:
             raise ValueError("base_url must be provided (set SCRAPER_BASE_URL in .env or pass --base-url)")
+        if sectional_tolerance < 0:
+            raise ValueError("sectional_tolerance must be non-negative")
+        self.sectional_tolerance = sectional_tolerance
         self.base_url = base_url
         self.rate_limit = rate_limit
         self.max_retries = max_retries
+        self._last_request = 0.0
         ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
         self.client = httpx.Client(headers={"User-Agent": ua, "Accept-Language": "en-US,en;q=0.9"}, timeout=30.0, follow_redirects=True)
 
@@ -214,6 +326,10 @@ class IncrementalScraper:
         last_exc = None
         for attempt in range(self.max_retries):
             try:
+                delay = self.rate_limit - (time.monotonic() - self._last_request)
+                if delay > 0:
+                    time.sleep(delay)
+                self._last_request = time.monotonic()
                 r = self.client.get(url)
                 r.raise_for_status()
                 return r.text
@@ -248,17 +364,9 @@ class IncrementalScraper:
 
         if not races:
             return []
-        max_by_meeting = {}
-        for race_date, course, race_number in races:
-            key = (race_date, course)
-            max_by_meeting[key] = max(race_number, max_by_meeting.get(key, 0))
-        for (race_date, course), max_race in max_by_meeting.items():
-            for race_number in range(1, max_race + 1):
-                key = (race_date, course, race_number)
-                if key not in races:
-                    query = urlencode({"racedate": race_date, "Racecourse": course, "RaceNo": race_number})
-                    races[key] = urlunparse((parsed_base.scheme or "https", parsed_base.netloc or "racing.hkjc.com", parsed_base.path, "", query, ""))
-        return [races[key] for key in sorted(races, key=lambda race: (race[0], race[1], race[2]))]
+        requested_date = _race_identity(self.base_url)[1]
+        return [races[key] for key in sorted(races, key=lambda race: (race[0], race[1], race[2]))
+                if not requested_date or _race_identity(races[key])[1] == requested_date]
 
     def parse_and_save(self, race_url: str):
         html = self._get(race_url)
@@ -272,44 +380,38 @@ class IncrementalScraper:
         if not meeting_date:
             raise ValueError(f"Could not determine meeting date from {race_url}")
 
-        course_description, track_type, rail_position = _course_details(page_text)
-
         venue_names = {"ST": "Sha Tin", "HV": "Happy Valley"}
         venue = venue_names.get((course or "").upper())
         if not venue:
             meeting_match = re.search(r"Race Meeting:\s*\d{2}/\d{2}/\d{4}\s+(.+?)(?:\s+(?:Information|Race|S\d+))", page_text)
             venue = meeting_match.group(1).strip() if meeting_match else None
 
-        class_match = re.search(r"Class\s+[\w]+\s*[-–]\s*\d{3,4}M", page_text, re.IGNORECASE)
-        distance_match = re.search(r"Class\s+[\w]+\s*[-–]\s*(\d{3,4})M", page_text, re.IGNORECASE)
-        going_label = re.search(r"Going\s*:\s*", page_text, re.IGNORECASE)
-        course_label = re.search(r"\s+Course\s*:", page_text, re.IGNORECASE)
-        metadata_block = None
-        if going_label and course_label and going_label.end() < course_label.start():
-            metadata_block = page_text[going_label.end():course_label.start()].strip()
-        if metadata_block:
-            going_options = ("GOOD TO FIRM", "GOOD TO YIELDING", "WET FAST", "GOOD", "YIELDING", "SOFT", "SLOW", "FAST", "FIRM")
-            going = None
-            race_name = metadata_block
-            for going_option in going_options:
-                if metadata_block.upper().startswith(going_option + " "):
-                    going = going_option
-                    race_name = metadata_block[len(going_option):].strip()
-                    break
-        else:
-            going_match = re.search(r"Going\s*:\s*([A-Z][A-Z ]+?)(?:\s+Course\s*:|\s+Time\s*:|$)", page_text, re.IGNORECASE)
-            going = going_match.group(1).strip() if going_match else None
-            race_name_match = re.search(r"([A-Z][A-Z0-9 '’.-]+(?:HANDICAP|CUP|STAKES))\s+Course\s*:", page_text)
-            race_name = race_name_match.group(1).strip() if race_name_match else None
-
+        meeting = re.search(r"Race Meeting:\s*(\d{2}/\d{2}/\d{4})\s+(Sha Tin|Happy Valley)", page_text)
+        if not meeting or datetime.strptime(meeting[1], "%d/%m/%Y").date().isoformat() != meeting_date or meeting[2] != venue:
+            raise RaceParseError("Returned results meeting date/venue does not match requested race")
+        metadata = _race_metadata(soup, race_number)
+        sectional_status = "MISSING_AT_SOURCE"
         sectional_source_url = _sectional_page_url(race_url, soup, meeting_date, race_number)
         sectional_error = None
         try:
-            sectional_soup = BeautifulSoup(self._get(sectional_source_url), "lxml")
-            sectionals_by_horse = _parse_sectionals(sectional_soup)
+            sectional_html = self._get(sectional_source_url)
+            sectional_soup = BeautifulSoup(sectional_html, "lxml")
+            # The selected date and visible racecourse validate the returned document.
+            selected = sectional_soup.select_one("select option[selected]")
+            text = sectional_soup.get_text(" ", strip=True)
+            source_date = selected.get("value") if selected else None
+            expected_date = datetime.fromisoformat(meeting_date).strftime("%d/%m/%Y")
+            if source_date != expected_date or venue not in text:
+                sectional_status = "RACE_MISMATCH"
+                raise RaceParseError("Returned sectional date or venue does not match result")
+            sectional_status = "PARSE_FAILED"
+            sectionals_by_horse = _parse_sectionals(sectional_soup, race_number)
+            sectional_status = "VALID" if sectionals_by_horse else "MISSING_AT_SOURCE"
         except Exception as exc:
             sectionals_by_horse = {}
             sectional_error = str(exc)
+            if sectional_status == "MISSING_AT_SOURCE":
+                sectional_status = "FETCH_FAILED"
 
         runners = []
         for row, cells in _result_rows(soup):
@@ -318,17 +420,45 @@ class IncrementalScraper:
             trainer_name = cells[4]
             horse_no = int(cells[1])
             runner_id = hashlib.sha1(f"{race_id}|{horse_no}".encode()).hexdigest()
-            horse_map = map_entity("horse", horse_name)
-            jockey_map = map_entity("jockey", jockey_name)
-            trainer_map = map_entity("trainer", trainer_name)
-            horse_link = row.select_one("td:nth-of-type(3) a")
-            jockey_link = row.select_one("td:nth-of-type(4) a")
-            trainer_link = row.select_one("td:nth-of-type(5) a")
+            horse_link = row[2].select_one("a[href]")
+            horse_code = _horse_code(cells[2], horse_link.get("href") if horse_link else None)
+            horse_map = map_entity("horse", horse_name, {"source_id": horse_code} if horse_code else None)
+            jockey_link = row[3].select_one("a[href]")
+            trainer_link = row[4].select_one("a[href]")
+            def source_identity(link, key):
+                return _query_value(parse_qs(urlparse(link.get("href")).query), key) if link else None
+            jockey_code = source_identity(jockey_link, "jockeyid")
+            trainer_code = source_identity(trainer_link, "trainerid")
+            jockey_map = map_entity("jockey", jockey_name, {"source_id": jockey_code} if jockey_code else None)
+            trainer_map = map_entity("trainer", trainer_name, {"source_id": trainer_code} if trainer_code else None)
+            position = int(cells[0]) if cells[0].isdigit() else None
+            sections = sectionals_by_horse.get(horse_no, {})
+            runner_sectional_status = sectional_status
+            if sections and (not horse_code or sections["horse_code"] != horse_code):
+                sections = {}
+                runner_sectional_status = "RACE_MISMATCH"
+            segment_values = [v.get("section_time_seconds") for v in sections.get("sections", [])]
+            if runner_sectional_status == "VALID":
+                finish = _finish_time_seconds(cells[10])
+                if not segment_values:
+                    runner_sectional_status = "MISSING_AT_SOURCE"
+                elif finish is None or any(v is None for v in segment_values) or abs(sum(segment_values) - finish) > self.sectional_tolerance + .000001:
+                    runner_sectional_status = "TIME_MISMATCH"
             runners.append({
                 "runner_id": runner_id,
                 "race_id": race_id,
                 "horse_no": horse_no,
                 "horse_name": horse_name,
+                "horse_code": horse_code,
+                "legacy_horse_id": horse_map.get("legacy_id"),
+                "identity_status": "SOURCE_CODE" if horse_code else "NAME_FALLBACK",
+                "finish_status": _finish_status(cells[0]),
+                "placing_text": cells[0],
+                "odds_text": cells[11],
+                "parse_warnings": [field for field, value in
+                    [("finishing_time", _finish_time_seconds(cells[10])), ("win_odds", _as_float(cells[11])),
+                     ("margin", _margin_in_lengths(cells[8], position))] if value is None],
+                "sectional_status": runner_sectional_status,
                 "horse_id": horse_map["canonical_id"],
                 "jockey_name": jockey_name,
                 "jockey_id": jockey_map["canonical_id"],
@@ -342,7 +472,7 @@ class IncrementalScraper:
                 "actual_weight": _as_float(cells[5]),
                 "declared_horse_weight": _as_float(cells[6]),
                 "draw": int(cells[7]) if cells[7].isdigit() else None,
-                "margin": _margin_in_lengths(cells[8]),
+                "margin": _margin_in_lengths(cells[8], position),
                 "margin_text": cells[8],
                 "running_position": cells[9],
                 "finishing_time": _finish_time_seconds(cells[10]),
@@ -352,38 +482,43 @@ class IncrementalScraper:
                 "initial_win_odds": None,
                 "gear": None,
                 "jockey_allowance": None,
-                "sectionals": sectionals_by_horse.get(horse_no, []),
+                "sectionals": sections.get("sections", []),
             })
 
         if not runners:
-            raise RaceNotPublished(f"No result rows found at {race_url}; the race may not have been run yet")
+            raise RaceParseError(f"No result rows found at {race_url}")
 
         out = {
             "race_id": race_id,
             "meeting_date": meeting_date,
             "venue": venue,
             "race_number": race_number,
-            "race_name": race_name,
-            "distance_m": int(distance_match.group(1)) if distance_match else None,
-            "grade": class_match.group(0).split("-")[0].strip() if class_match else None,
-            "going": going,
-            "course_description": course_description,
-            "track_type": track_type,
-            "rail_position": rail_position,
             "dividends": _parse_dividends(soup),
             "sectional_source_url": sectional_source_url,
             "sectional_error": sectional_error,
             "source_url": race_url,
             "runners": runners,
             "scraped_at": datetime.now(timezone.utc).isoformat(),
+            "source_checksum": hashlib.sha256(html.encode()).hexdigest(),
         }
+        if sectional_status == 'VALID' and any(r['sectional_status'] != 'VALID' for r in runners):
+            sectional_status = next(r['sectional_status'] for r in runners if r['sectional_status'] != 'VALID')
+        out['sectional_rounding_tolerance_seconds'] = self.sectional_tolerance
+        out.update(metadata)
+        out.update({"venue_code": course, "racecourse": venue, "race_status": "PUBLISHED",
+                    "timezone": "Asia/Hong_Kong", "scheduled_start_at_hkt": None,
+                    "actual_start_at_hkt": None, "start_time_source": None, "time_precision": None,
+                    "sectional_status": sectional_status, "schema_version": 2})
         fname = DATA_DIR / f"race_{race_id}.json"
-        fname.write_text(json.dumps(out, indent=2))
-        return out
+        return save_race(fname, out)
 
-    def run_incremental(self):
+    def run_incremental(self, retry_failed=False, refresh=False):
         checkpoint = _load_checkpoint()
         urls = self.list_recent_race_urls()
+        if not urls:
+            raise RaceParseError("No official race links discovered; meeting coverage is unverified")
+        records = checkpoint.setdefault("races", {})
+        checkpoint["attempted_urls"] = []
         new_count = 0
         pending = 0
         errors = []
@@ -392,16 +527,31 @@ class IncrementalScraper:
                 race_id, _, _, _ = _race_identity(url)
                 output_path = DATA_DIR / f"race_{race_id}.json"
                 is_new = not output_path.exists()
-                self.parse_and_save(url)
+                record = records.get(race_id, {})
+                if retry_failed and record.get("status") == "SUCCESS" and record.get("verified"):
+                    continue
+                if not refresh and not retry_failed and not is_new and record.get("verified"):
+                    last = datetime.fromisoformat(record["last_successful_fetch"])
+                    age = (datetime.now(timezone.utc) - last).total_seconds()
+                    if age < 30 * 86400:
+                        continue
+                checkpoint['attempted_urls'].append(url)
+                result = self.parse_and_save(url)
+                meeting_age = (datetime.now(timezone.utc).date() - datetime.fromisoformat(result['meeting_date']).date()).days
+                verified = meeting_age > 7 and bool(result.get('dividends')) and all(r.get('sectional_status') == 'VALID' for r in result['runners']) and not result.get('parse_warnings')
+                records[race_id] = {'url': url, 'status': 'SUCCESS', 'verified': verified,
+                    'last_successful_fetch': result['scraped_at'], 'content_checksum': result['source_checksum']}
                 if is_new:
                     new_count += 1
                 checkpoint["last_race_id"] = race_id
                 time.sleep(self.rate_limit)
-            except RaceNotPublished:
+            except RaceNotPublished as exc:
+                records[race_id] = {"url": url, "status": "NOT_PUBLISHED", "error": str(exc)}
                 pending += 1
                 time.sleep(self.rate_limit)
             except Exception as e:
-                print("scrape error", e)
+                records[race_id] = {"url": url, "status": "FAILED", "error": str(e)}
+                print(json.dumps({"url": url, "status": "FAILED", "error": str(e)}))
                 errors.append(e)
         # update checkpoint (simple: timestamp)
         checkpoint["last_run_at"] = datetime.now(timezone.utc).isoformat()
@@ -417,6 +567,9 @@ def _main():
     parser = argparse.ArgumentParser(description="Incremental scraper runner")
     parser.add_argument("--base-url", dest="base_url", help="Base listing URL to scrape (overrides SCRAPER_BASE_URL env var)")
     parser.add_argument("--date", dest="date", help="Meeting date to scrape, e.g. 2026-09-27 (defaults to the site's current meeting)")
+    parser.add_argument("--retry-failed", action="store_true", help="Retry incomplete/failed discovered races; skip prior successes")
+    parser.add_argument("--refresh", action="store_true", help="Ignore the 30-day cache for verified older races")
+    parser.add_argument("--validate", action="store_true", help="Validate the saved records after scraping")
     args = parser.parse_args()
     base_url = args.base_url or os.getenv("SCRAPER_BASE_URL") or DEFAULT_BASE_URL
     if args.date:
@@ -429,8 +582,13 @@ def _main():
         base_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", urlencode({"racedate": meeting_date.strftime("%Y/%m/%d")}), ""))
     s = IncrementalScraper(base_url)
     try:
-        found = s.run_incremental()
+        found = s.run_incremental(retry_failed=args.retry_failed, refresh=args.refresh)
         print("Found", found, "new races")
+        if args.validate:
+            from validate_racing_data import validate_races
+            report = validate_races([json.loads(p.read_text()) for p in DATA_DIR.glob("race_*.json")])
+            atomic_json(WORKDIR / "output" / "validation_report.json", report)
+            return 1 if report['errors'] else 0
         return 0
     except Exception as e:
         print("Scraper failed:", e)

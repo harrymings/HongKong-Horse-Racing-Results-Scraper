@@ -114,3 +114,147 @@ These paths are included in `.gitignore`.
 This project expects a PostgreSQL database. Set `DATABASE_URL` environment variable before running the API or `db.init_db()`.
 
 
+
+## Data-integrity fixes and validation
+
+The scraper now reads race metadata from the requested race header and identifies
+runner tables by column names. `Class 4 (Restricted)` and en dashes are supported.
+Horse identity uses the HKJC code when present; the old name ID remains as an
+alias. Existing race and runner IDs are retained. Name-only identities remain
+explicitly unresolved rather than being joined to a coded horse by name.
+
+Result JSON preserves raw margin, odds, finish-time and dividend strings. Lengths
+are numeric lengths; named margins use conventional approximations (nose 0.05,
+short head 0.10, head 0.20, neck 0.25). Finish times and segment times are seconds.
+`---` is zero only for a winner. DNF, scratched and disqualified statuses are
+separate from numeric placing. Unknown layouts fail parsing.
+
+Sectionals must match the returned meeting date, venue, race container and horse
+code. Each runner has `sectional_status` and retains source values. Segment sums
+are checked against finish time with a default 0.10 second tolerance, configurable
+through `IncrementalScraper(..., sectional_tolerance=...)`. Invalid sectionals are
+retained with an unverified status. The source URL remains attached to the race.
+
+`scheduled_start_at_hkt` and `actual_start_at_hkt` remain null until a
+suitable source is implemented. `timezone` is `Asia/Hong_Kong`. HKJC's elapsed
+`Time:` values are never interpreted as wall-clock start times. The legacy SQL
+`race_time` column remains untouched.
+
+`weather` and `venue_weather` are **daily summaries**, not race-time observations.
+CSV includes `WeatherResolution` and `VenueWeatherResolution`. Racecourse weather
+has field-level dataset, station, observation date, source URL and availability.
+CLMTEMP, CLMMAXT and CLMMINT are fetched independently; absent RYES does not block
+historical climate values. RYES is not requested before 2019-09-10. Supported data
+are determined by the actual station/date/field response; no nearby station is
+silently substituted. Daily `known_at` remains null and
+`is_pre_race_available=false`. Missing hourly observations are never fabricated.
+
+Scraping and backfill share weather enrichment. Raw records and exports are saved
+atomically. Missing refresh values retain existing values and weather provenance.
+A smaller refreshed roster retains historical runners and is flagged as a blocking
+validation issue pending reconciliation. A verified correction can replace an
+existing value; an absent value cannot delete it.
+
+### Safe local workflow
+
+Run the inventory on the installation containing your history, before migration:
+
+```bash
+python inventory_backup.py --report output/inventory.json
+python inventory_backup.py --database --backup-dir backups/BEFORE_MIGRATION --report output/backup_inventory.json
+```
+
+The second command requires PostgreSQL `pg_dump` and `pg_restore`. It copies and
+checksums source files and verifies the dump archive can be listed. Test restoration
+on a separate database before production migration; archive verification is not a
+restoration test. Backups refuse to overwrite an existing directory. No historical
+data was present in the development checkout.
+
+```bash
+python -m pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest -q
+python -m compileall -q scraper_incremental.py dashboard.py ingest.py api.py
+ruff check --select E9,F63,F7,F82 .
+python validate_racing_data.py --data-dir data --report-dir output
+```
+
+Validation is read-only and reports blocking errors separately from warnings. It
+returns 0 for checked records without blocking errors, 1 for errors, and 2 when
+there is no data. A passing record check does not establish full meeting coverage.
+Reports explicitly distinguish unverified coverage and unchecked DB parity.
+
+After verifying backups, apply the additive migration and ingest:
+
+```bash
+python migrate.py --backup-verified
+python ingest.py
+python validate_racing_data.py --database --data-dir data --report-dir output
+```
+
+Existing installations already have `schema.sql` applied. For a brand-new database,
+run `python -c "from ingest import ensure_schema; ensure_schema()"` before migration.
+Migrations are versioned and transactional; they do not delete rows or collapse
+legacy duplicates. Unique constraints stop migration when legacy duplicates need
+review. Ingestion refuses duplicated race inputs and runner numbers. It stores
+sectionals, dividends and weather with source JSON and does not synthesize odds
+history from final odds. `horse_identity_aliases` can contain several coded horses
+for an ambiguous legacy name; it must not be used as an unconditional one-to-one join.
+
+To propose identity corrections without modifying records:
+
+```bash
+python reconcile_identity.py
+python reconcile_identity.py --apply --backup-dir backups/BEFORE_IDENTITY_CHANGE
+```
+
+The apply command backs up the affected files and mappings before writing. It
+changes horse IDs only where an official code is present in the record/link,
+retains `legacy_horse_id`, and never changes race/runner IDs. Re-ingest afterward.
+Name-only records and historical alias conflicts require review. For a full
+installation backup, use the inventory command first.
+
+Opt-in network workflows (respect source access policies):
+
+```bash
+python scraper_incremental.py --date 2026-11-14 --validate
+python scraper_incremental.py --date 2026-11-14 --retry-failed
+python scraper_incremental.py --date 2026-11-14 --refresh
+python backfill_venue_weather.py
+```
+
+The scraper enumerates explicit official links for the requested date. It no longer
+fills gaps by guessing all numbers up to a maximum. It does not yet independently
+verify race-card declarations or distinguish every cancelled/unpublished layout;
+an unknown page is a parse failure, never assumed unpublished. CLI checkpoints
+record per-race fetch status/checksum. Older-than-seven-day races with dividends,
+valid sectionals and clean metadata are cached for 30 days after a successful
+fetch. Incomplete races are revisited; `--retry-failed` skips only verified successes;
+`--refresh` forces re-fetching. The dashboard always refreshes selected results.
+
+Dashboard states are `SUCCESS`, `PARTIAL`, `FAILED`, `CANCELLED`, with expected
+**discovered** race counts and per-race errors. A failed race cannot yield a clean
+success. Each export has a `.manifest.json` with collection status, validation,
+coverage limitations, and quality counts. Backfill preserves earlier collection
+metadata; stand-alone exports without a collection manifest are `UNVERIFIED`.
+Job progress is persisted so interrupted work is marked failed after restart.
+Only one scrape runs at a time; stop requests wait for the active request to finish.
+Use the default localhost binding. Remote POSTs require `DASHBOARD_TOKEN` through
+`X-Dashboard-Token`; the interactive dashboard is intended for local use.
+Deletion is limited to `hkjc_*.csv/json` exports, excludes symlinks, and uses the
+existing browser confirmation.
+
+### Model limits
+
+`/predict` retains its route but returns HTTP 409 until independent declared
+runners and feature publication cutoffs are implemented. Completed-race entrants
+must not be represented as future entries. Offline baseline training uses only
+historical start/win counts, excludes same-day starts from history, splits by
+meeting date into train/validation/test, and fits imputation on training data only.
+The evaluation JSON includes ROC-AUC, PR-AUC, log loss, Brier score, calibration and
+top-pick hit rate. At least five meeting dates are required. This remains a
+retrospective diagnostic: historical result publication cutoffs and the
+completed-race cohort have not been verified for a pre-race backtest. There is no
+profitability claim.
+
+See [validation evidence and remaining work](docs/VALIDATION.md). CI runs offline
+fixtures and an isolated PostgreSQL test; CI never scrapes external sources.

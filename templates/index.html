@@ -227,7 +227,7 @@
 
           bar.style.width = `${percent}%`;
           progress.setAttribute('aria-valuenow', String(percent));
-          state.textContent = status.running ? 'Running' : (status.error ? 'Failed' : (status.done ? (status.downloads.length ? 'Complete' : 'No exports for selected dates') : 'Idle'));
+          state.textContent = `${status.state || 'IDLE'} · ${status.successful || 0}/${status.expected || 0} discovered races`;
           document.getElementById('progress-text').textContent = status.running
             ? `${status.current} · ${status.done}/${status.total} dates`
             : (status.total ? `${status.done}/${status.total} dates` : '');

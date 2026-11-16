@@ -1,0 +1,33 @@
+{
+  "meeting_date": "2026-11-14",
+  "venue": "Sha Tin",
+  "job_state": "SUCCESS",
+  "discovered": 11,
+  "race_statuses": {
+    "1": "PUBLISHED",
+    "2": "PUBLISHED",
+    "3": "PUBLISHED",
+    "4": "PUBLISHED",
+    "5": "PUBLISHED",
+    "6": "ABANDONED",
+    "7": "PUBLISHED",
+    "8": "PUBLISHED",
+    "9": "PUBLISHED",
+    "10": "PUBLISHED",
+    "11": "PUBLISHED"
+  },
+  "counts": {
+    "dates": 1,
+    "races": 11,
+    "runners": 140,
+    "sectionals": 514,
+    "dividends": 180
+  },
+  "validation_errors": [],
+  "sectional_status_counts": {
+    "VALID": 137,
+    "TIME_MISMATCH": 2,
+    "MISSING_AT_SOURCE": 1
+  },
+  "notes": "Real dashboard job: 10 published rosters, 1 officially abandoned race. Counts include withdrawals; unverified sectionals are retained with status."
+}

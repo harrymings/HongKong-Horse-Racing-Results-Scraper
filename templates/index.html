@@ -35,7 +35,7 @@
       .mark { width: 12px; height: 12px; background: var(--clay); border-radius: 50%; box-shadow: 7px 0 0 var(--leaf); margin-right: 7px; }
       .notice { margin: 18px 0 0; padding: 12px 14px; border-left: 4px solid var(--clay); background: #fff7f2; }
       .workbench { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); gap: 24px; margin-top: 24px; }
-      .panel { background: var(--white); border: 1px solid var(--line); border-radius: 6px; }
+      .panel { min-width: 0; background: var(--white); border: 1px solid var(--line); border-radius: 6px; }
       .panel-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
       .panel-head h2 { margin: 0; font: 700 21px/1.15 Georgia, "Times New Roman", serif; }
       .panel-body { padding: 20px; }
@@ -60,20 +60,23 @@
       .download-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
       .log { min-height: 185px; max-height: 300px; overflow: auto; padding: 12px; color: #e9f1e8; background: #1b2924; border-radius: 4px; font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; }
       .section { margin-top: 24px; }
-      .table-wrap { overflow-x: auto; }
+      .table-wrap { max-width: 100%; overflow-x: auto; }
       table { width: 100%; border-collapse: collapse; font-size: 13px; }
       th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--line); }
       th { color: var(--muted); font-size: 11px; text-transform: uppercase; }
-      .exports-table { table-layout: fixed; }
-      .exports-table .select-col { width: 4%; text-align: center; }
-      .exports-table th:nth-child(2) { width: 42%; }
-      .exports-table th:nth-child(3) { width: 10%; }
-      .exports-table th:nth-child(4) { width: 19%; }
-      .exports-table th:nth-child(5) { width: 25%; }
+      .exports-table { table-layout: fixed; min-width: 900px; }
+      .exports-table .select-col { width: 48px; text-align: center; }
+      .exports-table th:nth-child(2) { width: auto; }
+      .exports-table th:nth-child(3) { width: 80px; }
+      .exports-table th:nth-child(4) { width: 170px; }
+      .exports-table th:nth-child(5) { width: 220px; }
       .export-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
       .export-toolbar .button { min-height: 36px; padding: 7px 12px; }
       .toolbar-hint { color: var(--muted); font-size: 12px; }
-      .exports-table td { overflow-wrap: anywhere; }
+      .exports-table th, .exports-table td { overflow-wrap: normal; }
+      .exports-table td:nth-child(2) { overflow-wrap: anywhere; }
+      .exports-table td:nth-child(3), .exports-table td:nth-child(4), .file-actions .button { white-space: nowrap; }
+      .file-actions .button { width: auto; }
       .file-actions .button { min-height: 34px; padding: 6px 10px; margin: 2px 5px 2px 0; }
       .empty { padding: 18px 14px; color: var(--muted); }
       .weather-note { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
@@ -124,8 +127,8 @@
               <fieldset>
                 <legend>Racecourse</legend>
                 <div class="choice-row">
-                  <label class="choice"><input type="checkbox" name="courses" value="ST" checked> Sha Tin</label>
-                  <label class="choice"><input type="checkbox" name="courses" value="HV" checked> Happy Valley</label>
+                  <label class="choice"><input type="checkbox" name="courses" value="ST" {% if 'ST' in selected_courses %}checked{% endif %}> Sha Tin</label>
+                  <label class="choice"><input type="checkbox" name="courses" value="HV" {% if 'HV' in selected_courses %}checked{% endif %}> Happy Valley</label>
                 </div>
               </fieldset>
 
@@ -133,16 +136,16 @@
                 <fieldset>
                   <legend>File format</legend>
                   <select name="output_format">
-                    <option value="csv" selected>CSV spreadsheet</option>
-                    <option value="json">JSON records</option>
-                    <option value="both">CSV and JSON</option>
+                    <option value="csv" {% if selected_format == 'csv' %}selected{% endif %}>CSV spreadsheet</option>
+                    <option value="json" {% if selected_format == 'json' %}selected{% endif %}>JSON records</option>
+                    <option value="both" {% if selected_format == 'both' %}selected{% endif %}>CSV and JSON</option>
                   </select>
                 </fieldset>
                 <fieldset>
                   <legend>File grouping</legend>
                   <select name="output_mode">
-                    <option value="single" selected>One combined file</option>
-                    <option value="separate">Separate files by date</option>
+                    <option value="single" {% if selected_mode == 'single' %}selected{% endif %}>One combined file</option>
+                    <option value="separate" {% if selected_mode == 'separate' %}selected{% endif %}>Separate files by date</option>
                   </select>
                 </fieldset>
               </div>

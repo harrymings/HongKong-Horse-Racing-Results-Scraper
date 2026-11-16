@@ -22,7 +22,8 @@ def validate_races(races):
             error('Missing race identity')
         if race.get('roster_refresh_status') == 'MISMATCH_PRESERVED_HISTORY':
             error('Refreshed roster is smaller; historical runners retained pending reconciliation')
-        if not race.get('distance_m') or not race.get('grade'):
+        abandoned = race.get('race_status') == 'ABANDONED' and bool(race.get('abandonment_text'))
+        if not abandoned and (not race.get('distance_m') or not race.get('grade')):
             error('Missing distance or class')
         if not race.get('source_url'):
             error('Missing source URL')
@@ -35,7 +36,7 @@ def validate_races(races):
             if r.get('horse_no') in horses:
                 error('Duplicate horse number')
             horses.add(r.get('horse_no'))
-            if not r.get('horse_name') or not r.get('horse_no') or not r.get('runner_id'):
+            if not r.get('horse_name') or (not r.get('horse_no') and not (r.get('finish_status') == 'SCRATCHED' and r.get('horse_code'))) or not r.get('runner_id'):
                 error('Missing runner identity')
             if r.get('runner_id') in runner_ids:
                 error('Duplicate runner ID')
@@ -54,9 +55,9 @@ def validate_races(races):
                     error('Verified sectionals fail finish-time tolerance')
             else:
                 warnings.append({'race_id':rid,'runner_id':r.get('runner_id'),'message':'Sectionals unverified: '+str(r.get('sectional_status'))})
-        if not horses:
+        if not horses and not abandoned:
             error('Empty runner roster')
-        if not winners:
+        if not winners and not abandoned:
             error('No winner in published results')
         if winners>1:
             warnings.append({'race_id':rid,'message':'Multiple winners; official dead-heat evidence needs review'})

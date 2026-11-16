@@ -115,6 +115,7 @@ def test_weather_before_ryes(monkeypatch):
 
 def test_partial_status(monkeypatch,tmp_path):
     import dashboard
+    monkeypatch.setattr(dashboard,'JOB_FILE',tmp_path/'job.json')
     dashboard.cancel_event.clear()
     dashboard.job.update(expected=0,successful=0,races=[],log=[],error=None)
     class Worker:
@@ -176,4 +177,36 @@ def test_sectional_failure_classification(tmp_path,monkeypatch,mode,expected):
     assert winner['sectional_status']==expected
     if mode in {'date','horse','fetch','layout'}:
         assert winner['sectionals']==[]
+    worker.client.close()
+
+
+@pytest.mark.parametrize('number',[3,6])
+def test_official_withdrawal_and_abandonment(tmp_path,monkeypatch,number):
+    monkeypatch.setattr(scraper,'DATA_DIR',tmp_path)
+    monkeypatch.setattr(entities,'MAPPING_FILE',tmp_path/'entities.json')
+    worker=scraper.IncrementalScraper(scraper.DEFAULT_BASE_URL,rate_limit=0)
+    def fetch(url):
+        if 'displaysectionaltime' in url:
+            raise RuntimeError('Sectionals not included in this result fixture')
+        return (FIXTURES/f'results_sha_tin_2026-11-14_r{number}.html').read_text()
+    monkeypatch.setattr(worker,'_get',fetch)
+    result=worker.parse_and_save(URL.replace('RaceNo=1',f'RaceNo={number}'))
+    from validate_racing_data import validate_races
+    assert not validate_races([result])['errors']
+    if number==3:
+        withdrawn=[r for r in result['runners'] if r['finish_status']=='SCRATCHED']
+        assert {r['horse_code'] for r in withdrawn}=={'K399','L060'}
+        assert next(r for r in withdrawn if r['horse_code']=='K399')['horse_no'] is None
+    else:
+        assert result['race_status']=='ABANDONED'
+        assert result['runners']==[]
+    worker.client.close()
+
+
+def test_listing_includes_displayed_race_without_self_link(monkeypatch):
+    worker=scraper.IncrementalScraper(scraper.DEFAULT_BASE_URL+'?racedate=2026/11/14',rate_limit=0)
+    html=(FIXTURES/'results_sha_tin_2026-11-14_r1.html').read_text()
+    html+='<a href="?racedate=2026/11/14&amp;Racecourse=ST&amp;RaceNo=2">Race 2</a>'
+    monkeypatch.setattr(worker,'_get',lambda url:html)
+    assert [scraper._race_identity(url)[3] for url in worker.list_recent_race_urls()]==[1,2]
     worker.client.close()

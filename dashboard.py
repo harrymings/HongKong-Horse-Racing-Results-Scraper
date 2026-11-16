@@ -59,7 +59,7 @@ def _job_state():
         return 'CANCELLED'
     if job.get('error'):
         return 'PARTIAL' if job.get('successful') else 'FAILED'
-    unsuccessful = any(r['status'] != 'SUCCESS' for r in job.get('races', []))
+    unsuccessful = any(r['status'] not in {'SUCCESS','ABANDONED'} for r in job.get('races', []))
     if unsuccessful:
         return 'PARTIAL' if job.get('successful') else 'FAILED'
     return 'SUCCESS' if job.get('expected') else 'FAILED'
@@ -258,7 +258,7 @@ def scrape_date(scraper, meet_date_str, selected_courses):
             diagnostic.update(status='FAILED_HTTP' if not isinstance(exc, ValueError) else 'FAILED_PARSE', error=str(exc))
             job['log'].append(f"Failed {race_url}: {exc}")
             continue
-        diagnostic['status'] = 'SUCCESS'
+        diagnostic['status'] = 'ABANDONED' if race.get('race_status') == 'ABANDONED' else 'SUCCESS'
         job['successful'] += 1
         races.append(race)
         atomic_json(JOB_FILE, job)
@@ -269,7 +269,7 @@ def scrape_date(scraper, meet_date_str, selected_courses):
 
 def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', output_mode='single'):
     job['running'] = True
-    job.update(state='RUNNING', races=[], expected=0, successful=0)
+    job.update(state='RUNNING', races=[], expected=0, successful=0, selected_courses=selected_courses, output_format=output_format, output_mode=output_mode)
     job['log'] = [f"Job started: {start_date} to {end_date}"]
     dates = [d for d in daterange(start_date, end_date)]
     job['total'] = len(dates)
@@ -391,7 +391,7 @@ def index():
             "generated_at": datetime.fromtimestamp(path.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
         })
     latest_export = next((export for export in exports if export['name'].endswith('.csv')), exports[0] if exports else None)
-    return render_template('index.html', default_start=default_date, default_end=default_date, exports=exports, latest_export=latest_export)
+    return render_template('index.html', default_start=default_date, default_end=default_date, exports=exports, latest_export=latest_export, selected_courses=job.get('selected_courses', ['ST','HV']), selected_format=job.get('output_format','csv'), selected_mode=job.get('output_mode','single'))
 
 
 @app.route('/run', methods=['POST'])

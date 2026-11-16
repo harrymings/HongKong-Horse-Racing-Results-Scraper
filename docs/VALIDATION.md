@@ -89,11 +89,11 @@ logical counts stable and does not replace known scalar values with nulls.
   mappings and production PostgreSQL were not available in this checkout.
 - Expected counts are official **linked** race counts, not an independently
   reconciled race-card/declaration roster. No full meeting completeness claim.
-- Cancelled/unpublished and unsupported result-row spans need additional original
+- Unpublished and unsupported result-row spans need additional original
   fixtures. Unknown structures raise parse errors rather than being guessed or
   labeled unpublished. The `RaceNotPublished` exception remains compatible with
   callers but is not inferred from missing result rows.
-- Only one official HKJC race is source-validated. Synthetic coverage for distance,
+- The initial audit source-validated one official HKJC race; the desktop demo now covers all 11 linked race pages for 2026-11-14, including the abandoned race. Synthetic coverage for distance,
   class, reordered/hidden cells and error scenarios is not a substitute for more
   permitted original layouts, dead heats, non-finishers and course variants.
 - Scheduled/actual start timestamps remain null: no suitable race-card/off-time
@@ -118,3 +118,18 @@ logical counts stable and does not replace known scalar values with nulls.
 
 PR #1 was merged after the code checks passed. These limitations still prevent
 a completed historical-data certification.
+
+## Desktop demo follow-up
+
+A real dashboard run on 2026-11-16 collected all 11 identified 2026-11-14 Sha Tin
+race pages: 10 result rosters and one official abandonment, with 140 runner records
+including withdrawals. Result/header-based discovery now includes the displayed
+race even when navigation has no link to itself. Source regressions cover an
+unnumbered withdrawn horse in Race 3 and abandonment in Race 6. Abandoned-race
+refund dividends remain in JSON. No horse number is invented for the unnumbered
+withdrawal. Sectional discrepancies retain their own unverified statuses.
+
+Desktop screenshots use a 1440 px viewport and show the actual completed job and
+preview. At 375 px, the 900 px export table scrolls inside its container instead
+of collapsing columns. Last submitted course/format/grouping settings remain
+visible after starting a job. See `desktop_demo_report.json` for counts and status.

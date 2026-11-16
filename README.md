@@ -4,12 +4,22 @@ A Python application for scraping Hong Kong horse-racing results from the HKJC w
 
 This repository now contains: scraper, incremental checkpointing, entity-resolution helpers, a PostgreSQL-backed schema, a FastAPI microservice, a small feature-engineering example, and baseline model training scaffolding.
 
-## Dashboard preview
+## Desktop demo: real scrape job
 
-<img src="docs/dashboard_current.jpg" width="360" alt="Current dashboard in a narrow browser: export form, job quality counts and saved exports" />
+![Desktop dashboard after a completed scrape job](docs/dashboard_desktop_job.jpg)
 
-Captured from the local dashboard in a narrow browser on 2026-11-16. The saved export is the single-race
-live smoke sample, not a complete meeting or historical archive.
+Real dashboard job run on 2026-11-16 for Sha Tin, 2026-11-14: **11/11 discovered
+race pages collected, 140 runner records, CSV and JSON exports generated**.
+Race 6 was officially abandoned and is preserved with its status and refund
+dividends; the ten other races have result rosters. Withdrawn horses remain
+explicitly marked, including a replacement without a published horse number.
+Collection coverage refers to the official linked pages, not an independent
+race-card audit.
+
+![Desktop saved exports and preview of the scraped records](docs/dashboard_desktop_preview.jpg)
+
+The table keeps readable column widths and scrolls horizontally on small screens.
+The screenshots use a 1440 px desktop viewport and real job status and exports.
 
 ## Usage
 

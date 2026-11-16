@@ -7,6 +7,8 @@
     "hko_clmtemp_sample.json": "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMTEMP&lang=en&rformat=json&station=SHA&year=2018&month=11",
     "hko_daily_sample.json": "https://www.hko.gov.hk/cis/dailyExtract/dailyExtract_202610.xml",
     "hko_clmmaxt_sample.json": "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMMAXT&lang=en&rformat=json&station=SHA&year=2018&month=11",
-    "hko_clmmint_sample.json": "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMMINT&lang=en&rformat=json&station=SHA&year=2018&month=11"
+    "hko_clmmint_sample.json": "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMMINT&lang=en&rformat=json&station=SHA&year=2018&month=11",
+    "results_sha_tin_2026-11-14_r3.html": "https://racing.hkjc.com/en-us/local/information/localresults?racedate=2026/11/14&Racecourse=ST&RaceNo=3",
+    "results_sha_tin_2026-11-14_r6.html": "https://racing.hkjc.com/en-us/local/information/localresults?racedate=2026/11/14&Racecourse=ST&RaceNo=6"
   }
 }

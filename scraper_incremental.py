@@ -153,11 +153,13 @@ def _result_rows(soup):
             raise RaceParseError("Unsupported result row structure; refusing positional guesses")
         ordered = [cells[i] for i in columns]
         texts = [c.get_text(" ", strip=True) for c in ordered]
-        if not texts[1].isdigit() or not texts[2]:
+        unnumbered_withdrawal = not texts[1] and _finish_status(texts[0]) == 'SCRATCHED' and _horse_code(texts[2], str(ordered[2]))
+        if (not texts[1].isdigit() and not unnumbered_withdrawal) or not texts[2]:
             raise RaceParseError("Missing horse number or name in result table")
-        if int(texts[1]) in seen:
-            raise RaceParseError(f"Duplicate horse number {texts[1]}")
-        seen.add(int(texts[1]))
+        identity = int(texts[1]) if texts[1].isdigit() else 'withdrawn:' + unnumbered_withdrawal
+        if identity in seen:
+            raise RaceParseError(f"Duplicate horse identity {identity}")
+        seen.add(identity)
         yield ordered, texts
     if not seen:
         raise RaceParseError("Official result table contains no runners")
@@ -354,6 +356,20 @@ class IncrementalScraper:
             race_date = _query_value(query, "racedate")
             if "localresults" in parsed.path.lower() and course in {"ST", "HV"} and race_number and race_number.isdigit() and race_date:
                 races[(race_date, course, int(race_number))] = full
+        # The displayed race has no navigation link to itself. Derive it from
+        # its official metadata header, rather than guessing gaps in numbering.
+        visible_meeting = re.search(r"Race Meeting:\s*(\d{2}/\d{2}/\d{4})\s+(Sha Tin|Happy Valley)", soup.get_text(" ", strip=True))
+        current_headers = soup.select('.race_tab table thead')
+        if visible_meeting:
+            current_date = datetime.strptime(visible_meeting[1], '%d/%m/%Y').strftime('%Y/%m/%d')
+            current_course = {'Sha Tin':'ST','Happy Valley':'HV'}[visible_meeting[2]]
+            for header in current_headers:
+                match = re.search(r"\bRACE\s+(\d+)\b", header.get_text(' ', strip=True), re.I)
+                if match:
+                    number = int(match[1])
+                    parsed = urlparse(self.base_url)
+                    query = urlencode({'racedate':current_date,'Racecourse':current_course,'RaceNo':number})
+                    races[(current_date,current_course,number)] = urlunparse((parsed.scheme,parsed.netloc,parsed.path,'',query,''))
         parsed_base = urlparse(self.base_url)
         base_query = parse_qs(parsed_base.query)
         base_course = (_query_value(base_query, "racecourse") or "").upper()
@@ -389,6 +405,14 @@ class IncrementalScraper:
         meeting = re.search(r"Race Meeting:\s*(\d{2}/\d{2}/\d{4})\s+(Sha Tin|Happy Valley)", page_text)
         if not meeting or datetime.strptime(meeting[1], "%d/%m/%Y").date().isoformat() != meeting_date or meeting[2] != venue:
             raise RaceParseError("Returned results meeting date/venue does not match requested race")
+        abandonment = 'This race is declared abandoned.'
+        if abandonment in page_text:
+            out = {'race_id':race_id,'meeting_date':meeting_date,'venue':venue,'venue_code':course,
+                   'race_number':race_number,'race_name':None,'grade':None,'going':None,'distance_m':None,
+                   'race_status':'ABANDONED','abandonment_text':abandonment,'runners':[],
+                   'source_url':race_url,'source_checksum':hashlib.sha256(html.encode()).hexdigest(),'dividends':_parse_dividends(soup),
+                   'timezone':'Asia/Hong_Kong','scraped_at':datetime.now(timezone.utc).isoformat()}
+            return save_race(DATA_DIR / f"race_{race_id}.json", out)
         metadata = _race_metadata(soup, race_number)
         sectional_status = "MISSING_AT_SOURCE"
         sectional_source_url = _sectional_page_url(race_url, soup, meeting_date, race_number)
@@ -418,8 +442,9 @@ class IncrementalScraper:
             horse_name = re.sub(r"\s*\([A-Z]\d+\)$", "", cells[2]).strip()
             jockey_name = cells[3]
             trainer_name = cells[4]
-            horse_no = int(cells[1])
-            runner_id = hashlib.sha1(f"{race_id}|{horse_no}".encode()).hexdigest()
+            horse_no = int(cells[1]) if cells[1].isdigit() else None
+            identity = horse_no if horse_no is not None else 'withdrawn:' + _horse_code(cells[2], str(row[2]))
+            runner_id = hashlib.sha1(f"{race_id}|{identity}".encode()).hexdigest()
             horse_link = row[2].select_one("a[href]")
             horse_code = _horse_code(cells[2], horse_link.get("href") if horse_link else None)
             horse_map = map_entity("horse", horse_name, {"source_id": horse_code} if horse_code else None)

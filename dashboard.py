@@ -7,9 +7,12 @@ from pathlib import Path
 import pandas as pd
 import time
 import threading
+import hmac
 import httpx
 from urllib.parse import parse_qs, urlparse
-from scraper_incremental import DATA_DIR, DEFAULT_BASE_URL, IncrementalScraper, RaceNotPublished
+from scraper_incremental import DATA_DIR, DEFAULT_BASE_URL, IncrementalScraper, RaceNotPublished, RaceParseError
+from persistence import atomic_json, atomic_text
+from weather import fetch_venue_weather, enrich_race_weather
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
@@ -25,9 +28,13 @@ HKO_OPEN_DATA = "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php"
 VENUE_STATIONS = {"Sha Tin": "SHA", "Happy Valley": "HPV"}
 
 
-# In-memory job status
+job_lock = threading.Lock()
+cancel_event = threading.Event()
+
+# Job status is persisted after completion; interrupted jobs are classified on restart.
 job = {
     'running': False,
+    'state': 'IDLE', 'races': [], 'expected': 0, 'successful': 0,
     'total': 0,
     'done': 0,
     'current': '',
@@ -36,6 +43,26 @@ job = {
     'downloads': [],
     'error': None,
 }
+
+JOB_FILE = OUTPUT_DIR / 'job_status.json'
+if JOB_FILE.exists():
+    try:
+        job.update(json.loads(JOB_FILE.read_text(encoding='utf-8')))
+        if job.get('running'):
+            job.update(running=False, state='FAILED', error='Process interrupted; retry failed races')
+    except (ValueError, OSError):
+        pass
+
+
+def _job_state():
+    if cancel_event.is_set():
+        return 'CANCELLED'
+    if job.get('error'):
+        return 'PARTIAL' if job.get('successful') else 'FAILED'
+    unsuccessful = any(r['status'] != 'SUCCESS' for r in job.get('races', []))
+    if unsuccessful:
+        return 'PARTIAL' if job.get('successful') else 'FAILED'
+    return 'SUCCESS' if job.get('expected') else 'FAILED'
 
 
 def daterange(start_date, end_date):
@@ -108,6 +135,13 @@ def _race_rows(races):
                 "VenueMeanTempC": venue_weather.get("mean_temp_c"),
                 "VenueWeatherSource": venue_weather.get("source_url"),
                 "VenueWeatherStatus": ("Daily max/min measured at the " + venue_weather["station"] + " racecourse station; whole-day values, not race-time readings") if venue_weather else "No racecourse-station observation published yet",
+                "HorseCode": runner.get("horse_code"),
+                "FinishStatus": runner.get("finish_status"),
+                "SectionalStatus": runner.get("sectional_status"),
+                "VenueWeatherResolution": "Daily" if venue_weather else None,
+                "ScheduledStartAtHKT": race.get("scheduled_start_at_hkt"),
+                "ActualStartAtHKT": race.get("actual_start_at_hkt"),
+                "Timezone": race.get("timezone", "Asia/Hong_Kong"),
                 "HorseId": runner["horse_id"],
                 "JockeyId": runner["jockey_id"],
                 "TrainerId": runner["trainer_id"],
@@ -115,16 +149,36 @@ def _race_rows(races):
     return rows
 
 
-def _save_exports(races, file_stem, output_format):
+def _save_exports(races, file_stem, output_format, collection_summary=None):
     downloads = []
     if output_format in {"csv", "both"}:
         csv_name = f"{file_stem}.csv"
-        pd.DataFrame(_race_rows(races)).to_csv(OUTPUT_DIR / csv_name, index=False, encoding='utf-8-sig')
+        atomic_text(OUTPUT_DIR / csv_name, pd.DataFrame(_race_rows(races)).to_csv(index=False), encoding='utf-8-sig')
         downloads.append(csv_name)
     if output_format in {"json", "both"}:
         json_name = f"{file_stem}.json"
-        (OUTPUT_DIR / json_name).write_text(json.dumps(races, indent=2), encoding="utf-8")
+        atomic_json(OUTPUT_DIR / json_name, races)
         downloads.append(json_name)
+    from validate_racing_data import validate_races
+    validation = validate_races(races)
+    previous_path = OUTPUT_DIR / (file_stem + '.manifest.json')
+    previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
+    summary = collection_summary or {}
+    collection_status = _job_state() if collection_summary is not None else previous.get('collection_status', 'UNVERIFIED')
+    if validation['errors']:
+        collection_status = 'PARTIAL'
+        if collection_summary is not None:
+            job['error'] = 'Export contains blocking validation errors; see manifest'
+    manifest = {'collection_status': collection_status,
+                'expected': summary.get('expected', previous.get('expected')),
+                'successful': summary.get('successful', previous.get('successful')),
+                'race_diagnostics': list(summary.get('races', previous.get('race_diagnostics', []))),
+                'race_count': len(races), 'runner_count': sum(len(r['runners']) for r in races),
+                'coverage_basis': 'Official linked races only; independent declaration roster not verified',
+                'validation_status': validation['status'], 'validation': validation, 'files': list(downloads),
+                'sectional_valid_runners': sum(r.get('sectional_status') == 'VALID' for race in races for r in race['runners']),
+                'venue_daily_weather_races': sum(bool(race.get('venue_weather')) for race in races)}
+    atomic_json(previous_path, manifest)
     return downloads
 
 
@@ -145,7 +199,12 @@ def _fetch_daily_weather(meeting_date, month_cache):
         else:
             response.raise_for_status()
             daily = {}
-            for month in response.json()["stn"]["data"]:
+            if not response.text.lstrip().startswith('{'):
+                raise ValueError('HKO daily archive payload is not the recorded JSON schema')
+            payload = response.json()
+            if not isinstance(payload.get('stn', {}).get('data'), list):
+                raise ValueError('Unexpected HKO daily archive schema')
+            for month in payload["stn"]["data"]:
                 if int(month["month"]) != meeting_date.month:
                     continue
                 for values in month["dayData"]:
@@ -170,85 +229,39 @@ def _fetch_daily_weather(meeting_date, month_cache):
     return month_cache[month_key].get(meeting_date.isoformat())
 
 
-def _fetch_venue_weather(venue, meeting_date, ryes_cache, clm_cache):
-    """Daily weather from the HKO station AT the racecourse (SHA = Sha Tin, HPV = Happy Valley).
-
-    Max/min temp come from the RYES daily bulletin (published ~01:30 the next day,
-    so available to yesterday). Mean temp comes from the CLMTEMP climate dataset,
-    which loads with a longer lag (~1 month). Both are whole-day values for the
-    meeting date at the racecourse station -- not race-time readings.
-    """
-    station_code = VENUE_STATIONS.get((venue or '').strip())
-    if not station_code:
-        return None
-    camel = venue.strip().replace(' ', '')  # RYES JSON keys drop spaces: 'Sha Tin' -> 'ShaTinMaxTemp'
-    ryes_key = (station_code, meeting_date.isoformat())
-    if ryes_key not in ryes_cache:
-        report = None
-        try:
-            response = httpx.get(HKO_OPEN_DATA, params={
-                'dataType': 'RYES', 'lang': 'en',
-                'date': meeting_date.strftime('%Y%m%d'), 'station': station_code,
-            }, timeout=20, follow_redirects=True)
-            if response.status_code == 200:
-                data = response.json()
-                max_t = _weather_number(data.get(f'{camel}MaxTemp'))
-                min_t = _weather_number(data.get(f'{camel}MinTemp'))
-                if max_t is not None or min_t is not None:
-                    report = {
-                        'date': meeting_date.isoformat(),
-                        'station': venue.strip(),
-                        'station_code': station_code,
-                        'max_temp_c': max_t,
-                        'min_temp_c': min_t,
-                        'mean_temp_c': None,
-                        'source_url': f'{HKO_OPEN_DATA}?dataType=RYES&date={meeting_date.strftime("%Y%m%d")}&station={station_code}',
-                    }
-        except (httpx.HTTPError, ValueError):
-            report = None
-        ryes_cache[ryes_key] = report
-    report = ryes_cache[ryes_key]
-    if report is None:
-        return None
-    if report.get('mean_temp_c') is None:
-        clm_key = (station_code, meeting_date.year, meeting_date.month)
-        if clm_key not in clm_cache:
-            monthly = {}
-            try:
-                response = httpx.get(HKO_OPEN_DATA, params={
-                    'dataType': 'CLMTEMP', 'lang': 'en', 'rformat': 'json',
-                    'station': station_code, 'year': meeting_date.year, 'month': meeting_date.month,
-                }, timeout=30, follow_redirects=True)
-                if response.status_code == 200:
-                    for row in response.json().get('data', []):
-                        if len(row) >= 4 and str(row[1]) == str(meeting_date.month):
-                            try:
-                                monthly[int(row[2])] = float(row[3])
-                            except (TypeError, ValueError):
-                                continue
-            except (httpx.HTTPError, ValueError):
-                pass
-            clm_cache[clm_key] = monthly
-        report['mean_temp_c'] = clm_cache[clm_key].get(meeting_date.day)
-    return report
+_fetch_venue_weather = fetch_venue_weather
 
 
 def scrape_date(scraper, meet_date_str, selected_courses):
     races = []
     iso_date = datetime.strptime(meet_date_str, "%d/%m/%Y").strftime("%Y/%m/%d")
     scraper.base_url = BASE_URL_TEMPLATE.format(date=iso_date)
-    for race_url in scraper.list_recent_race_urls():
-        if _course_from_url(race_url) not in selected_courses:
-            continue
+    urls = scraper.list_recent_race_urls()
+    requested_date = datetime.strptime(meet_date_str, "%d/%m/%Y").date().isoformat()
+    from scraper_incremental import _race_identity
+    urls = [u for u in urls if _race_identity(u)[1] == requested_date]
+    selected = [u for u in urls if _course_from_url(u) in selected_courses]
+    job['expected'] += len(selected)
+    if not selected:
+        job['error'] = f'No official race links discovered for {meet_date_str}; coverage unverified'
+    for race_url in selected:
+        if cancel_event.is_set():
+            break
+        diagnostic = {'url': race_url, 'status': 'ATTEMPTED', 'error': None}
+        job['races'].append(diagnostic)
         try:
             race = scraper.parse_and_save(race_url)
-        except RaceNotPublished:
-            job['log'].append(f"No published results yet: {race_url}")
+        except RaceNotPublished as exc:
+            diagnostic.update(status='NOT_PUBLISHED', error=str(exc))
             continue
         except Exception as exc:
+            diagnostic.update(status='FAILED_HTTP' if not isinstance(exc, ValueError) else 'FAILED_PARSE', error=str(exc))
             job['log'].append(f"Failed {race_url}: {exc}")
             continue
+        diagnostic['status'] = 'SUCCESS'
+        job['successful'] += 1
         races.append(race)
+        atomic_json(JOB_FILE, job)
         time.sleep(scraper.rate_limit)
 
     return races
@@ -256,6 +269,7 @@ def scrape_date(scraper, meet_date_str, selected_courses):
 
 def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', output_mode='single'):
     job['running'] = True
+    job.update(state='RUNNING', races=[], expected=0, successful=0)
     job['log'] = [f"Job started: {start_date} to {end_date}"]
     dates = [d for d in daterange(start_date, end_date)]
     job['total'] = len(dates)
@@ -263,6 +277,7 @@ def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', 
     job['output_file'] = None
     job['downloads'] = []
     job['error'] = None
+    atomic_json(JOB_FILE, job)
     races_by_date = []
     weather_months = {}
     ryes_cache = {}
@@ -273,7 +288,7 @@ def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', 
     try:
         scraper = IncrementalScraper(DEFAULT_BASE_URL)
         for d in dates:
-            if not job['running']:
+            if cancel_event.is_set():
                 job['log'].append('Job cancelled')
                 break
             meet_date = d.strftime('%d/%m/%Y')
@@ -286,13 +301,11 @@ def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', 
                 except (httpx.HTTPError, ValueError, KeyError) as exc:
                     weather = None
                     job['log'].append(f"HKO archive unavailable for {meet_date}: {exc}")
-                for race in races:
-                    race['weather'] = weather
-                    try:
-                        race['venue_weather'] = _fetch_venue_weather(race.get('venue'), d, ryes_cache, clm_months)
-                    except (httpx.HTTPError, ValueError, KeyError) as exc:
-                        race['venue_weather'] = None
-                        job['log'].append(f"Racecourse station weather unavailable for {race.get('venue')} {meet_date}: {exc}")
+                for i, race in enumerate(races):
+                    races[i] = enrich_race_weather(
+                        race, lambda day: weather,
+                        lambda venue, day: _fetch_venue_weather(venue, day, ryes_cache, clm_months),
+                        DATA_DIR / f"race_{race['race_id']}.json")
                 (matched_dates if weather else missing_dates).add(d.isoformat())
                 races_by_date.append((d, races))
                 runner_count = sum(len(race['runners']) for race in races)
@@ -300,17 +313,18 @@ def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', 
                 if output_mode == 'separate':
                     course_slug = "-".join(sorted(selected_courses)).lower()
                     stem = f"hkjc_{course_slug}_{d.strftime('%Y-%m-%d')}"
-                    job['downloads'].extend(_save_exports(races, stem, output_format))
+                    job['downloads'].extend(_save_exports(races, stem, output_format, job))
             else:
                 job['log'].append(f"No published race results for {meet_date}")
             job['done'] += 1
+            atomic_json(JOB_FILE, job)
             time.sleep(0.1)
 
         if races_by_date and output_mode == 'single':
             all_races = [race for _, races in races_by_date for race in races]
             course_slug = "-".join(sorted(selected_courses)).lower()
             stem = f"hkjc_{course_slug}_{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}"
-            job['downloads'].extend(_save_exports(all_races, stem, output_format))
+            job['downloads'].extend(_save_exports(all_races, stem, output_format, job))
         if races_by_date:
             job['log'].append(f"Historical HKO daily weather matched {len(matched_dates)} meeting date(s); unavailable for {len(missing_dates)}")
             venue_count = sum(1 for _, rs in races_by_date for r in rs if r.get('venue_weather'))
@@ -329,9 +343,25 @@ def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', 
                 scraper.client.close()
             except Exception:
                 pass
+        job['state'] = _job_state()
         job['running'] = False
         job['current'] = ''
-        job['log'].append('Job finished')
+        job['log'].append('Job finished: ' + job['state'])
+        atomic_json(JOB_FILE, job)
+
+
+@app.before_request
+def protect_mutations():
+    if request.method != 'POST':
+        return None
+    origin=request.headers.get('Origin')
+    if origin and urlparse(origin).netloc != request.host:
+        return jsonify(error='Cross-origin mutation rejected'),403
+    if request.remote_addr not in {'127.0.0.1','::1'}:
+        configured=os.getenv('DASHBOARD_TOKEN')
+        provided=request.headers.get('X-Dashboard-Token','')
+        if not configured or not hmac.compare_digest(configured,provided):
+            return jsonify(error='Remote mutations require X-Dashboard-Token'),403
 
 
 @app.route('/')
@@ -346,7 +376,7 @@ def index():
     data_files = sorted(
         (path for path in OUTPUT_DIR.iterdir()
          if path.is_file() and path.suffix in {'.csv', '.json'}
-         and not path.name.endswith(('_sectionals.csv', '_dividends.csv'))),
+         and not path.name.endswith(('_sectionals.csv', '_dividends.csv', '.manifest.json')) and path.name.startswith('hkjc_')),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
@@ -403,7 +433,13 @@ def run_scrape():
         return redirect(url_for('index'))
 
     t = threading.Thread(target=run_scrape_job, args=(start_date, end_date, selected_courses, output_format, output_mode), daemon=True)
-    t.start()
+    with job_lock:
+        if job['running']:
+            flash('A job is already running')
+            return redirect(url_for('index'))
+        cancel_event.clear()
+        job['running'] = True
+        t.start()
     flash('Scraping started in background')
     return redirect(url_for('index'))
 
@@ -411,6 +447,8 @@ def run_scrape():
 @app.route('/status')
 def status():
     return jsonify({
+        'state': job.get('state'), 'expected': job.get('expected'),
+        'successful': job.get('successful'), 'races': list(job.get('races', [])),
         'running': job['running'],
         'total': job['total'],
         'done': job['done'],
@@ -425,7 +463,7 @@ def status():
 @app.route('/stop', methods=['POST'])
 def stop():
     if job['running']:
-        job['running'] = False
+        cancel_event.set()
         job['log'].append('Stop requested by user')
         flash('Stop requested')
     else:
@@ -452,7 +490,7 @@ def delete_files():
     for raw in requested:
         fname = Path(raw).name
         file_path = OUTPUT_DIR / fname
-        if (not fname or file_path.suffix.lower() not in {'.csv', '.json'}
+        if (not fname.startswith('hkjc_') or file_path.is_symlink() or file_path.suffix.lower() not in {'.csv', '.json'}
                 or file_path.parent != OUTPUT_DIR or not file_path.is_file()):
             skipped.append(raw)
             continue

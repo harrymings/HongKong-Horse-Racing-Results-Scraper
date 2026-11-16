@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-11-16",
+  "notes": "Small source-derived HTML fragments; navigation/scripts omitted. Other page variants in tests are mutations explicitly marked synthetic.",
+  "sources": {
+    "results_sha_tin_2026-11-14_r1.html": "https://racing.hkjc.com/en-us/local/information/localresults?racedate=2026/11/14&Racecourse=ST&RaceNo=1",
+    "sectionals_sha_tin_2026-11-14_r1.html": "https://racing.hkjc.com/en-us/local/information/displaysectionaltime?RaceNo=1&racedate=14%2F11%2F2026",
+    "hko_clmtemp_sample.json": "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMTEMP&lang=en&rformat=json&station=SHA&year=2018&month=11",
+    "hko_daily_sample.json": "https://www.hko.gov.hk/cis/dailyExtract/dailyExtract_202610.xml",
+    "hko_clmmaxt_sample.json": "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMMAXT&lang=en&rformat=json&station=SHA&year=2018&month=11",
+    "hko_clmmint_sample.json": "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMMINT&lang=en&rformat=json&station=SHA&year=2018&month=11"
+  }
+}

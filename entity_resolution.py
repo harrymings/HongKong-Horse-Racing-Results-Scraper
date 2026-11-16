@@ -3,6 +3,7 @@ import json
 import hashlib
 import os
 import tempfile
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, Optional
@@ -76,11 +77,25 @@ def map_entity(entity_type: str, raw_name: str, metadata: Optional[Dict] = None)
     with _mapping_lock():
         mappings = load_mappings()
         norm = normalize_name(raw_name)
+        source_id = (metadata or {}).get("source_id")
+        if source_id:
+            source_id = source_id.upper()
+            cid = hashlib.sha1(f"{entity_type}:hkjc:{source_id}".encode()).hexdigest()
+            legacy = canonical_id_for(entity_type, raw_name)
+            info = mappings.get(cid, {"entity_type": entity_type, "canonical_name": raw_name.strip(),
+                                      "canonical_name_norm": norm, "aliases": [],
+                                      "legacy_ids": [], "metadata": {"source_id": source_id}})
+            info["aliases"] = sorted(set(info["aliases"] + [norm]))
+            info["legacy_ids"] = sorted(set(info["legacy_ids"] + [legacy]))
+            info["last_seen"] = datetime.now(timezone.utc).isoformat()
+            mappings[cid] = info
+            save_mappings(mappings)
+            return {"canonical_id": cid, "canonical_name": info["canonical_name"], "legacy_id": legacy}
         for cid, info in mappings.items():
-            if info.get("entity_type") == entity_type:
+            if info.get("entity_type") == entity_type and not info.get("metadata", {}).get("source_id"):
                 aliases = info.get("aliases", []) or []
                 if norm in aliases or norm == info.get("canonical_name_norm"):
-                    info["last_seen"] = __import__("datetime").datetime.utcnow().isoformat()
+                    info["last_seen"] = datetime.now(timezone.utc).isoformat()
                     mappings[cid] = info
                     save_mappings(mappings)
                     return {"canonical_id": cid, "canonical_name": info.get("canonical_name")}
@@ -92,7 +107,7 @@ def map_entity(entity_type: str, raw_name: str, metadata: Optional[Dict] = None)
             "canonical_name_norm": norm,
             "aliases": [norm],
             "metadata": metadata or {},
-            "last_seen": __import__("datetime").datetime.utcnow().isoformat(),
+            "last_seen": datetime.now(timezone.utc).isoformat(),
         }
         save_mappings(mappings)
         return {"canonical_id": cid, "canonical_name": raw_name.strip()}

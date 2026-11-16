@@ -29,3 +29,9 @@ def check_incomplete_runners():
             if not r.get("horse_id"):
                 bad.append((j.get("race_id"), r))
     return bad
+
+
+def validate_collected_races():
+    """Run shared checks without modifying source records."""
+    from validate_racing_data import validate_races
+    return validate_races([json.loads(path.read_text(encoding="utf-8")) for path in DATA_DIR.glob("race_*.json")])

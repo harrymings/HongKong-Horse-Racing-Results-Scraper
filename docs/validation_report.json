@@ -1,0 +1,43 @@
+{
+  "status": "PASSED",
+  "counts": {
+    "dates": 1,
+    "races": 1,
+    "runners": 14,
+    "sectionals": 42,
+    "dividends": 13
+  },
+  "null_counts": {
+    "horse_name": 0,
+    "horse_code": 0,
+    "draw": 0,
+    "actual_weight": 0,
+    "declared_horse_weight": 0,
+    "finishing_pos": 0,
+    "finishing_time": 0,
+    "win_odds": 0
+  },
+  "null_share": {
+    "horse_name": 0.0,
+    "horse_code": 0.0,
+    "draw": 0.0,
+    "actual_weight": 0.0,
+    "declared_horse_weight": 0.0,
+    "finishing_pos": 0.0,
+    "finishing_time": 0.0,
+    "win_odds": 0.0
+  },
+  "errors": [],
+  "warnings": [],
+  "coverage_status": "UNVERIFIED_WITHOUT_MEETING_MANIFEST",
+  "database_parity": {
+    "status": "PASSED",
+    "counts": {
+      "races": 1,
+      "runners": 14,
+      "sectionals": 42,
+      "dividends": 13
+    },
+    "errors": []
+  }
+}

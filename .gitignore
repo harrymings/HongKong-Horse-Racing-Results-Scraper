@@ -34,3 +34,4 @@ dashboard_stderr.log
 # OS
 Thumbs.db
 Desktop.ini
+model.evaluation.json

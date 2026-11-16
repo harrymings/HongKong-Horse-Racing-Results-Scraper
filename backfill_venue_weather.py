@@ -30,18 +30,10 @@ def main():
         except (ValueError, OSError) as exc:
             print(f"skip {path.name}: {exc}")
             continue
-        meeting_date = date.fromisoformat(race['meeting_date'])
-        try:
-            race['weather'] = _fetch_daily_weather(meeting_date, weather_months)
-        except Exception as exc:
-            race['weather'] = None
-            print(f"  HKO daily extract unavailable for {race['meeting_date']}: {exc}")
-        try:
-            race['venue_weather'] = _fetch_venue_weather(race.get('venue'), meeting_date, ryes_cache, clm_cache)
-        except Exception as exc:
-            race['venue_weather'] = None
-            print(f"  venue weather unavailable for {race.get('venue')} {race['meeting_date']}: {exc}")
-        path.write_text(json.dumps(race, indent=2), encoding='utf-8')
+        from weather import enrich_race_weather
+        race = enrich_race_weather(race,
+            lambda day: _fetch_daily_weather(day, weather_months),
+            lambda venue, day: _fetch_venue_weather(venue, day, ryes_cache, clm_cache), path)
         races.append(race)
         time.sleep(0.15)
 

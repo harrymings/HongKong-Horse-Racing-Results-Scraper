@@ -4,24 +4,17 @@ A Python application for scraping Hong Kong horse-racing results from the HKJC w
 
 This repository now contains: scraper, incremental checkpointing, entity-resolution helpers, a PostgreSQL-backed schema, a FastAPI microservice, a small feature-engineering example, and baseline model training scaffolding.
 
-# Disclaimer
-This project is for educational purposes only and is not intended for commerical use. The author shall not be held liable for any claims, damages, or other liabilities arising from or in connection with the script or its use. 
+## Dashboard preview
 
-[![Anurag's GitHub stats](https://github-readme-stats.vercel.app/api?username=harrymings)](https://github.com/anuraghazra/github-readme-stats)
+<img src="docs/dashboard_current.jpg" width="360" alt="Current dashboard in a narrow browser: export form, job quality counts and saved exports" />
 
-# Reminder
-Please install all necessary python packages by running
-pip install -r requirements.txt
+Captured from the local dashboard in a narrow browser on 2026-11-16. The saved export is the single-race
+live smoke sample, not a complete meeting or historical archive.
 
-# Sample
+## Usage
 
-### Build a data export and run a scrape job
-
-<img width="100%" alt="HKJC Results Desk dashboard: build a data export form with date range, racecourse, file format and grouping options, plus the scrape job panel showing progress, the download button and the per-date activity log" src="docs/dashboard_export_form.png" />
-
-### Saved exports with weather-merged preview
-
-<img width="100%" alt="Saved exports table with delete, preview and download actions; the expanded preview shows race rows joined with racecourse station daily weather, including venue max, min and mean temperature columns" src="docs/dashboard_saved_exports.png" />
+Use source data only as permitted by HKJC and HKO terms. This project does not
+bypass access restrictions or provide a verified pre-race prediction service.
 
 ## Quickstart (Windows)
 1. Run one-click setup to create a virtualenv and install deps:
@@ -62,7 +55,7 @@ python dashboard.py
 
 Choose a date range, Sha Tin and/or Happy Valley, CSV and/or JSON, then combined or per-day files. The main CSV contains the race, runner, sectionals, dividends, final odds, and date-matched historical weather fields (racecourse station + HKO Observatory) in one file. Sectionals and dividends are stored as JSON text in the relevant CSV cells so each runner remains one row. JSON exports retain the full nested structure. Exports are saved under `output/`; the command-line scraper also writes race JSON under `data/`.
 
-Weather is joined by meeting date from two HKO sources. The `Venue*` columns come from the HKO station at the racecourse itself (SHA = Sha Tin, HPV = Happy Valley): daily maximum/minimum temperature from the Weather and Radiation Level bulletin (published ~01:30 the next day, so available to yesterday) and daily mean temperature from the climate dataset (loads with a ~1-month lag). The `Weather*` columns are the Hong Kong Observatory headquarters daily extract (mean pressure, temperatures, dew point, humidity, cloud, rainfall) kept as a city-wide reference. Both are whole-day values for the meeting date at their station, not race-time readings; dates not yet published remain blank. Do not use full-day weather summaries or post-race odds as pre-race prediction features: they are not available at the time of betting.
+Weather is joined by meeting date from two HKO sources. The `Venue*` columns come from the HKO station at the racecourse itself (SHA = Sha Tin, HPV = Happy Valley): daily mean, maximum and minimum temperature from independent climate datasets, with the Weather and Radiation Level bulletin supplementing missing maximum/minimum values where available. The `Weather*` columns are the Hong Kong Observatory headquarters daily extract (mean pressure, temperatures, dew point, humidity, cloud, rainfall) kept as a city-wide reference. Both are whole-day values for the meeting date at their station, not race-time readings; dates not yet published remain blank. Do not use full-day weather summaries or post-race odds as pre-race prediction features: they are not available at the time of betting.
 
 ## Ingesting scraped data into PostgreSQL
 1. Configure your Postgres connection in `.env`: set `DATABASE_URL` to a valid `postgresql+psycopg2://user:pass@host:port/dbname` string.
@@ -73,7 +66,11 @@ To run ingestion manually:
 ```powershell
 call .venv\Scripts\activate.bat
 python check_db.py   # verifies DB connectivity
-python ingest.py     # ingests all JSON files from data/ into Postgres
+python -c "from ingest import ensure_schema; ensure_schema()" # new databases only
+# Verify a backup/restore before applying migrations to an existing database.
+python migrate.py --backup-verified
+python ingest.py
+python validate_racing_data.py --database
 ```
 
 If ingestion fails, check that Postgres is running and `.env` is configured correctly.
@@ -85,7 +82,10 @@ After scraping enough completed races, build a baseline model with:
 python models_baseline.py
 ```
 
-The model uses historical starts, wins, draw, weights and race distance. It excludes the current result, finishing time, margin and odds from features. `POST /predict` requires a saved `model.pkl`, an initialized database and runners for the requested race. Predictions are only useful before a race if pre-race entries are available; the current results scraper discovers runners from completed race pages.
+The baseline uses historical starts and wins only, with chronological holdouts.
+It requires at least five meeting dates and writes a retrospective evaluation.
+`POST /predict` returns HTTP 409 until independent pre-race entries and publication
+cutoffs are implemented. Completed-race entrants are not future race cards.
 
 ## Data to scrape next
 - Pre-race race cards: declared runners, draw, carried weight, jockey, trainer, equipment and official ratings. This is the key addition needed for genuine pre-race predictions.

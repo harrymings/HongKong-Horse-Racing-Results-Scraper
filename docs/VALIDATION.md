@@ -5,9 +5,8 @@ Working branch: `fix/racing-data-integrity`. Evidence collected 2026-11-16.
 
 ## Scope and results
 
-This is a substantial implementation of the supplied fix plan, submitted as a
-**draft** because the complete historical audit and several source-dependent gates
-remain open. It is not a claim that every item in the plan is complete.
+This is a substantial implementation of the supplied fix plan, merged through PR #1 on 2026-11-16. The complete historical audit and several
+source-dependent gates remain open. It is not a claim that every item in the plan is complete.
 
 - **46 tests passed** with PostgreSQL 17, Python 3.14, and an isolated disposable DB.
 - Compile check passed for scraper, dashboard, ingestion and API.
@@ -117,5 +116,5 @@ logical counts stable and does not replace known scalar values with nulls.
   overlapping jobs; it is not a distributed worker queue. Remote POSTs require an
   explicit token; default operation remains localhost.
 
-These limitations are why the PR remains a draft and must not be described as a
-completed historical-data certification.
+PR #1 was merged after the code checks passed. These limitations still prevent
+a completed historical-data certification.

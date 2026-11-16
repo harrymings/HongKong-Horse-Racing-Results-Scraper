@@ -23,3 +23,38 @@ jobs:
       - run: python -m compileall -q scraper_incremental.py dashboard.py ingest.py api.py
       - run: ruff check --select E9,F63,F7,F82 .
       - run: python -m pytest -q
+  windows-launchers:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify batch setup and launchers
+        shell: python
+        run: |
+          import os, pathlib, subprocess, tempfile, time, urllib.request
+          root = pathlib.Path.cwd()
+          cwd = tempfile.mkdtemp(prefix='launcher outside repo ')
+          def batch(name, *args):
+              command = 'call "' + str(root / name) + '" ' + ' '.join(args)
+              return subprocess.run(command, shell=True, cwd=cwd,
+                                    stdin=subprocess.DEVNULL, check=True, timeout=600)
+          batch('run_setup.bat')
+          batch('run_scraper.bat', '--help')
+          process = subprocess.Popen('call "' + str(root / 'run_dashboard.bat') + '"', shell=True,
+                                     cwd=cwd, stdin=subprocess.DEVNULL)
+          try:
+              for attempt in range(60):
+                  if process.poll() is not None:
+                      raise RuntimeError('Dashboard exited before startup')
+                  try:
+                      with urllib.request.urlopen('http://127.0.0.1:8501/status', timeout=2) as response:
+                          assert response.status == 200
+                      break
+                  except OSError:
+                      time.sleep(1)
+              else:
+                  raise RuntimeError('Dashboard did not respond')
+          finally:
+              subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], check=False)

@@ -1,32 +1,18 @@
 @echo off
-REM One-click setup: create virtual environment and install requirements
-if not exist ".venv\Scripts\activate.bat" (
+setlocal
+cd /d "%~dp0"
+if not exist "requirements.txt" goto failed
+if not exist ".venv\Scripts\python.exe" (
     python -m venv .venv
+    if errorlevel 1 goto failed
 )
-call .venv\Scripts\activate.bat
-REM Use the venv python explicitly to avoid global pip issues
-set VENV_PY=.venv\Scripts\python.exe
-%VENV_PY% -m pip install --upgrade pip
-if exist requirements.txt (
-    %VENV_PY% -m pip install -r requirements.txt || (
-        echo "pip install -r requirements.txt failed, attempting fallback installs"
-        %VENV_PY% -m pip install flask pandas httpx beautifulsoup4 lxml fastapi uvicorn psycopg2-binary SQLAlchemy python-dotenv polars scikit-learn || (
-            echo "Fallback install also failed; please inspect the error above"
-        )
-    )
-) else (
-    echo requirements.txt not found; installing essential packages
-    %VENV_PY% -m pip install flask pandas httpx beautifulsoup4 lxml fastapi uvicorn psycopg2-binary SQLAlchemy python-dotenv polars scikit-learn
-)
-echo.
-REM Create .env with placeholder DATABASE_URL if missing
-if not exist ".env" (
-    echo DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/hkracing> .env
-    echo SCRAPER_BASE_URL=https://racing.hkjc.com/en-us/local/information/localresults>> .env
-    echo Created .env with placeholder DATABASE_URL
-    echo Please edit .env with your Postgres credentials
-)
-echo.
-echo Setup complete.
-echo Edit .env if needed, then run run_dashboard.bat or run_scraper.bat
+".venv\Scripts\python.exe" -m pip install -r requirements.txt
+if errorlevel 1 goto failed
+echo Setup complete. Run run_dashboard.bat or run_scraper.bat.
+echo PostgreSQL is optional. Configure DATABASE_URL only if using database features.
 pause
+exit /b 0
+:failed
+echo Setup failed. Check the error above and ensure Python 3.10+ is installed.
+pause
+exit /b 1

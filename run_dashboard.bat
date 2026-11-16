@@ -1,10 +1,12 @@
 @echo off
-REM Start the local HKJC results dashboard
-if not exist ".venv\Scripts\activate.bat" (
-    echo Virtual environment not found. Run run_setup.bat first.
+setlocal
+cd /d "%~dp0"
+if not exist ".venv\Scripts\python.exe" (
+    echo Run run_setup.bat first.
     pause
     exit /b 1
 )
-call .venv\Scripts\activate.bat
-.venv\Scripts\python.exe dashboard.py
+".venv\Scripts\python.exe" dashboard.py
+set "RUN_EXIT=%ERRORLEVEL%"
 pause
+exit /b %RUN_EXIT%

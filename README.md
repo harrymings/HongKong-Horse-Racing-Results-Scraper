@@ -103,7 +103,7 @@ cutoffs are implemented. Completed-race entrants are not future race cards.
 - Sectional times and running positions are included from HKJC's sectional-time pages, including per-section positions and margins behind the leader.
 - Race incidents and veterinary/steward notes: available from the race reports and helpful for explaining unusual outcomes.
 - Dividends and final win odds are included from the result pages. Initial odds are not present in the verified results source and still need a historical odds feed.
-- Track surface/rail details are included where present on results. Historical weather is matched by date from HKO observations, including the station at each racecourse (daily max/min/mean temperature); race-time weather is not published historically by HKO for these stations.
+- Track surface/rail details are included where present on results. Historical weather is matched by date from HKO observations, including the station at each racecourse (daily max/min/mean temperature); timestamped HKO observations are retrieved from the public DATA.GOV.HK archive where station/date coverage exists (see race-time weather below).
 - Gear and jockey claim allowance are race-card fields not present in the verified historical result rows; they remain unavailable until a reliable race-card source is added.
 
 Keep requests rate-limited and respect HKJC terms and access restrictions. The scraper does not bypass authentication or anti-bot controls.
@@ -145,10 +145,12 @@ are checked against finish time with a default 0.10 second tolerance, configurab
 through `IncrementalScraper(..., sectional_tolerance=...)`. Invalid sectionals are
 retained with an unverified status. The source URL remains attached to the race.
 
-`scheduled_start_at_hkt` and `actual_start_at_hkt` remain null until a
-suitable source is implemented. `timezone` is `Asia/Hong_Kong`. HKJC's elapsed
-`Time:` values are never interpreted as wall-clock start times. The legacy SQL
-`race_time` column remains untouched.
+`scheduled_start_at_hkt` is populated from the exact HKJC declared-starters
+meeting/race header, with `Asia/Hong_Kong` timezone and source URL.
+`actual_start_at_hkt` remains null unless independently supplied by a reliable
+source. The scheduled time is never called the actual off-time. HKJC's elapsed
+`Time:` values are never used as wall-clock starts. Legacy SQL `race_time` remains
+untouched.
 
 `weather` and `venue_weather` are **daily summaries**, not race-time observations.
 CSV includes `WeatherResolution` and `VenueWeatherResolution`. Racecourse weather
@@ -268,3 +270,72 @@ profitability claim.
 
 See [validation evidence and remaining work](docs/VALIDATION.md). CI runs offline
 fixtures and an isolated PostgreSQL test; CI never scrapes external sources.
+
+## Race-time weather (hourly and subhourly source intervals)
+
+New scrapes now attempt **real timestamped observations**, separate from the
+existing daily weather. There is no daily-to-hourly interpolation. The source
+interval is kept per field: temperature/humidity are 1-minute means, wind is a
+10-minute mean with gust, and rainfall is a past-hour total only when its archive
+is available. These are not fabricated full-hour temperature averages.
+
+The provider uses the [official DATA.GOV.HK archive API](https://data.gov.hk/en/help/api-spec)
+and exact HKO station names (Sha Tin or Happy Valley). It selects the latest
+archive capture available before the scheduled start, then verifies the actual
+observation time is no later than that start and no more than 30 minutes old.
+Archive capture precision is one minute, so availability uses a conservative
+end-of-minute upper bound. Actual start is used only if separately known.
+
+CSV adds `RaceTimeWeatherStatus`, `RaceTimeTempC`, `RaceTimeHumidityPct`,
+`RaceTimeWindSpeedKph`, `RaceTimeWindDirection`, `RaceTimeWindGustKph`,
+`RaceTimeRainfallMm`, target kind/time and field-level provenance JSON. JSON adds
+`race_time_weather.fields`, each with observation interval, raw value, station,
+original/archived source URL, archive capture, availability bound and age.
+`RaceTimeWeatherResolution=mixed` means fields have different source intervals;
+it is not an hourly mean. Daily columns retain their original meaning.
+
+**Coverage limits:** sampled 2018-11-14 files had no archive; 2022-11-14 and
+2026-11-14 had temperature at both venues, humidity/wind at Sha Tin, and no
+Happy Valley humidity/wind station in those files. Historical rainfall's tested
+archive endpoint returned 404, so rainfall stays null with `ARCHIVE_UNAVAILABLE`.
+These are sampled dates, not a guarantee for every intervening date. The provider
+never substitutes a neighbouring station. Source records are provisional.
+
+For command-line scraping, add `--race-time-weather` (also supported by
+`run_scraper.bat`); dashboard jobs enable it automatically:
+
+```bash
+python scraper_incremental.py --date 2026-11-14 --race-time-weather --validate
+```
+
+For an existing dataset, preview first; applying requires a new verified JSON/export
+backup directory and regenerates matching existing exports:
+
+```bash
+python backfill_race_time_weather.py --date 2026-11-14
+python backfill_race_time_weather.py --date 2026-11-14 --apply --backup-dir backups/BEFORE_TIMED_WEATHER
+python audit_weather_coverage.py --dates 2018-11-14 2022-11-14 2026-11-14
+```
+
+Use `--max-age-minutes` to change the 30-minute maximum (up to 120). Full dry-run
+reports are in `output/race_time_weather_report.json`; coverage reports are in
+`output/weather_coverage.json`. A dated `weather_cache/` stores source files and
+valid misses; transport/schema failures are retried. Historic schedules are
+refreshed after the cache expires, while failed refreshes retain the last known
+schedule with an explicit status. Do not manually edit schedules without source
+evidence. Timed weather is replaced as a complete match if the target changes,
+so an older target's values cannot leak into a new target.
+
+Before DB ingestion, apply migration `002_race_time_weather.sql` with the same
+backup-verification workflow. Timed fields are stored individually in
+`weather_observations` with their own interval and timestamp, joined to the race's
+specific target. No production DB migration is automatic.
+
+This does **not** enable pre-race prediction. The currently accessible historical
+race card does not establish its original publication cutoff; `pre_race_verified`
+remains false and `/predict` remains guarded. See [source audit and validation](docs/RACE_TIME_WEATHER.md).
+
+Weather attribution: Hong Kong Observatory, HKSAR Government and DATA.GOV.HK.
+Use is subject to [DATA.GOV.HK terms](https://data.gov.hk/en/terms-and-conditions)
+and the source's terms. No paid service, NOAA station substitution, forecast or
+reanalysis is used.

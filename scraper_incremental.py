@@ -537,7 +537,7 @@ class IncrementalScraper:
         fname = DATA_DIR / f"race_{race_id}.json"
         return save_race(fname, out)
 
-    def run_incremental(self, retry_failed=False, refresh=False):
+    def run_incremental(self, retry_failed=False, refresh=False, weather_provider=None):
         checkpoint = _load_checkpoint()
         urls = self.list_recent_race_urls()
         if not urls:
@@ -559,9 +559,16 @@ class IncrementalScraper:
                     last = datetime.fromisoformat(record["last_successful_fetch"])
                     age = (datetime.now(timezone.utc) - last).total_seconds()
                     if age < 30 * 86400:
+                        if weather_provider:
+                            from race_weather import enrich_race_time_weather
+                            saved = json.loads(output_path.read_text(encoding='utf-8'))
+                            enrich_race_time_weather(saved, weather_provider, output_path)
                         continue
                 checkpoint['attempted_urls'].append(url)
                 result = self.parse_and_save(url)
+                if weather_provider:
+                    from race_weather import enrich_race_time_weather
+                    result = enrich_race_time_weather(result, weather_provider, output_path)
                 meeting_age = (datetime.now(timezone.utc).date() - datetime.fromisoformat(result['meeting_date']).date()).days
                 verified = meeting_age > 7 and bool(result.get('dividends')) and all(r.get('sectional_status') == 'VALID' for r in result['runners']) and not result.get('parse_warnings')
                 records[race_id] = {'url': url, 'status': 'SUCCESS', 'verified': verified,
@@ -595,6 +602,7 @@ def _main():
     parser.add_argument("--retry-failed", action="store_true", help="Retry incomplete/failed discovered races; skip prior successes")
     parser.add_argument("--refresh", action="store_true", help="Ignore the 30-day cache for verified older races")
     parser.add_argument("--validate", action="store_true", help="Validate the saved records after scraping")
+    parser.add_argument('--race-time-weather', action='store_true', help='Attach scheduled starts and archived HKO timed observations')
     args = parser.parse_args()
     base_url = args.base_url or os.getenv("SCRAPER_BASE_URL") or DEFAULT_BASE_URL
     if args.date:
@@ -606,8 +614,12 @@ def _main():
         parsed = urlparse(base_url)
         base_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", urlencode({"racedate": meeting_date.strftime("%Y/%m/%d")}), ""))
     s = IncrementalScraper(base_url)
+    timed_provider = None
     try:
-        found = s.run_incremental(retry_failed=args.retry_failed, refresh=args.refresh)
+        if args.race_time_weather:
+            from race_weather import RaceWeatherProvider
+            timed_provider = RaceWeatherProvider()
+        found = s.run_incremental(retry_failed=args.retry_failed, refresh=args.refresh, weather_provider=timed_provider)
         print("Found", found, "new races")
         if args.validate:
             from validate_racing_data import validate_races
@@ -620,6 +632,8 @@ def _main():
         return 1
     finally:
         s.client.close()
+        if timed_provider:
+            timed_provider.close()
 
 
 if __name__ == "__main__":

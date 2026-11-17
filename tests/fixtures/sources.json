@@ -9,6 +9,15 @@
     "hko_clmmaxt_sample.json": "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMMAXT&lang=en&rformat=json&station=SHA&year=2018&month=11",
     "hko_clmmint_sample.json": "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMMINT&lang=en&rformat=json&station=SHA&year=2018&month=11",
     "results_sha_tin_2026-11-14_r3.html": "https://racing.hkjc.com/en-us/local/information/localresults?racedate=2026/11/14&Racecourse=ST&RaceNo=3",
-    "results_sha_tin_2026-11-14_r6.html": "https://racing.hkjc.com/en-us/local/information/localresults?racedate=2026/11/14&Racecourse=ST&RaceNo=6"
-  }
+    "results_sha_tin_2026-11-14_r6.html": "https://racing.hkjc.com/en-us/local/information/localresults?racedate=2026/11/14&Racecourse=ST&RaceNo=6",
+    "hko_archive_temperature.csv": "https://app.data.gov.hk/v1/historical-archive/get-file?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_temperature.csv&time=20261114-1228",
+    "hko_archive_temperature_versions.json": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_temperature.csv&start=20261114&end=20261114",
+    "hko_archive_humidity.csv": "https://app.data.gov.hk/v1/historical-archive/get-file?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_humidity.csv&time=20261114-1227",
+    "hko_archive_humidity_versions.json": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_humidity.csv&start=20261114&end=20261114",
+    "hko_archive_wind.csv": "https://app.data.gov.hk/v1/historical-archive/get-file?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_10min_wind.csv&time=20261114-1227",
+    "hko_archive_wind_versions.json": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_10min_wind.csv&start=20261114&end=20261114",
+    "declared_starters_2026-11-14.html": "https://racing.hkjc.com/Racing/Info/MCS/English/racing/prerace/dstr/20261114_ST0000_S_DSTR.xml.zip"
+  },
+  "race_weather_capture_date": "2026-11-17",
+  "attribution": "Weather: Hong Kong Observatory, HKSAR Government and DATA.GOV.HK. Data provisional; public archive observations. Schedules: HKJC. Small source excerpts only."
 }

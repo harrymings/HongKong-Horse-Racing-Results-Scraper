@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 from scraper_incremental import DATA_DIR, DEFAULT_BASE_URL, IncrementalScraper, RaceNotPublished, RaceParseError
 from persistence import atomic_json, atomic_text
 from weather import fetch_venue_weather, enrich_race_weather
+from race_weather import RaceWeatherProvider, enrich_race_time_weather
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
@@ -21,7 +22,7 @@ BASE_URL_TEMPLATE = DEFAULT_BASE_URL + "?racedate={date}"
 OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 COURSES = {"ST": "Sha Tin", "HV": "Happy Valley"}
-PREVIEW_COLUMNS = ["MeetDate", "RaceCourse", "RaceNumber", "HorseName", "Placing", "FinalWinOdds", "VenueWeatherStation", "VenueMaxTempC", "VenueMinTempC", "VenueMeanTempC", "WeatherMeanTempC", "WeatherRainfallMm", "WeatherMeanCloudPct", "HorseNo", "JockeyName", "TrainerName", "Draw", "FinishTime", "TrackType", "RailPosition", "VenueWeatherStatus", "WeatherStatus"]
+PREVIEW_COLUMNS = ["RaceTimeWeatherStatus", "ScheduledStartAtHKT", "RaceTimeTempC", "RaceTimeHumidityPct", "RaceTimeWindSpeedKph", "MeetDate", "RaceCourse", "RaceNumber", "HorseName", "Placing", "FinalWinOdds", "VenueWeatherStation", "VenueMaxTempC", "VenueMinTempC", "VenueMeanTempC", "WeatherMeanTempC", "WeatherRainfallMm", "WeatherMeanCloudPct", "HorseNo", "JockeyName", "TrainerName", "Draw", "FinishTime", "TrackType", "RailPosition", "VenueWeatherStatus", "WeatherStatus"]
 HKO_DAILY_ARCHIVE = "https://www.hko.gov.hk/cis/dailyExtract/dailyExtract_{year}{month:02d}.xml"
 HKO_OPEN_DATA = "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php"
 # Stations located AT the racecourses (HKO Open Data API station codes).
@@ -80,6 +81,7 @@ def _race_rows(races):
     for race in races:
         weather = race.get("weather") or {}
         venue_weather = race.get("venue_weather") or {}
+        timed_weather = race.get("race_time_weather") or {}
         for runner in race['runners']:
             rows.append({
                 "MeetDate": race["meeting_date"],
@@ -141,6 +143,19 @@ def _race_rows(races):
                 "VenueWeatherResolution": "Daily" if venue_weather else None,
                 "ScheduledStartAtHKT": race.get("scheduled_start_at_hkt"),
                 "ActualStartAtHKT": race.get("actual_start_at_hkt"),
+                "RaceTimeWeatherStatus": timed_weather.get('status'),
+                "RaceTimeWeatherStation": timed_weather.get('station'),
+                "RaceTimeWeatherResolution": timed_weather.get('resolution'),
+                "RaceTimeWeatherTargetAt": timed_weather.get('target_at'),
+                "RaceTimeWeatherTargetKind": timed_weather.get('target_kind'),
+                "RaceTimeTempC": timed_weather.get('temperature_c'),
+                "RaceTimeHumidityPct": timed_weather.get('humidity_pct'),
+                "RaceTimeWindSpeedKph": timed_weather.get('wind_speed_kph'),
+                "RaceTimeWindGustKph": timed_weather.get('wind_gust_kph'),
+                "RaceTimeWindDirection": timed_weather.get('wind_direction'),
+                "RaceTimeRainfallMm": timed_weather.get('rainfall_mm'),
+                "RaceTimeWeatherProvenance": json.dumps(timed_weather.get('fields',{}),ensure_ascii=False),
+                "RaceTimePreRaceVerified": timed_weather.get('pre_race_verified',False),
                 "Timezone": race.get("timezone", "Asia/Hong_Kong"),
                 "HorseId": runner["horse_id"],
                 "JockeyId": runner["jockey_id"],
@@ -177,7 +192,8 @@ def _save_exports(races, file_stem, output_format, collection_summary=None):
                 'coverage_basis': 'Official linked races only; independent declaration roster not verified',
                 'validation_status': validation['status'], 'validation': validation, 'files': list(downloads),
                 'sectional_valid_runners': sum(r.get('sectional_status') == 'VALID' for race in races for r in race['runners']),
-                'venue_daily_weather_races': sum(bool(race.get('venue_weather')) for race in races)}
+                'venue_daily_weather_races': sum(bool(race.get('venue_weather')) for race in races),
+                'race_time_weather_races': sum(any(i.get('status') == 'AVAILABLE' for i in race.get('race_time_weather',{}).get('fields',{}).values()) for race in races)}
     atomic_json(previous_path, manifest)
     return downloads
 
@@ -285,6 +301,7 @@ def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', 
     matched_dates = set()
     missing_dates = set()
     scraper = None
+    timed_provider = RaceWeatherProvider()
     try:
         scraper = IncrementalScraper(DEFAULT_BASE_URL)
         for d in dates:
@@ -306,6 +323,9 @@ def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', 
                         race, lambda day: weather,
                         lambda venue, day: _fetch_venue_weather(venue, day, ryes_cache, clm_months),
                         DATA_DIR / f"race_{race['race_id']}.json")
+                    races[i] = enrich_race_time_weather(races[i], timed_provider,
+                        DATA_DIR / f"race_{race['race_id']}.json")
+                    job['log'].append(f"Race {race['race_number']} timed weather: {races[i]['race_time_weather']['status']}")
                 (matched_dates if weather else missing_dates).add(d.isoformat())
                 races_by_date.append((d, races))
                 runner_count = sum(len(race['runners']) for race in races)
@@ -343,6 +363,7 @@ def run_scrape_job(start_date, end_date, selected_courses, output_format='csv', 
                 scraper.client.close()
             except Exception:
                 pass
+        timed_provider.close()
         job['state'] = _job_state()
         job['running'] = False
         job['current'] = ''

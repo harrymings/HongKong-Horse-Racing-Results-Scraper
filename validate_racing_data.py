@@ -71,6 +71,32 @@ def validate_races(races):
                     error('Same-day daily weather incorrectly marked pre-race')
                 if not w.get('station'):
                     error('Missing weather station')
+        timed=race.get('race_time_weather') or {}
+        target=timed.get('target_at')
+        if timed.get('pre_race_verified'):
+            error('Pre-race pipeline is not verified; timed weather cannot certify it')
+        for field, observation in timed.get('fields',{}).items():
+            if observation.get('status') != 'AVAILABLE':
+                continue
+            try:
+                from race_weather import aware
+                end=aware(observation['observation_period_end'])
+                start=aware(observation['observation_period_start'])
+                known=aware(observation['known_at'])
+                cutoff=aware(target)
+                if end>cutoff or known>cutoff or start>=end:
+                    error('Timed weather interval/public availability exceeds cutoff: '+field)
+                if observation.get('station')!=race.get('venue'):
+                    error('Timed weather station mismatch: '+field)
+                if (cutoff-end).total_seconds()>timed.get('max_age_minutes',30)*60:
+                    error('Stale timed weather: '+field)
+                if timed.get(field)!=observation.get('value'):
+                    error('Timed weather value/provenance mismatch: '+field)
+                expected_resolution='hourly' if observation.get('interval_minutes')==60 else 'subhourly'
+                if observation.get('resolution')!=expected_resolution:
+                    error('Incorrect timed weather resolution: '+field)
+            except (ValueError,KeyError,TypeError):
+                error('Malformed timed weather provenance: '+field)
     return {'status':'FAILED' if errors else ('NO_DATA' if not races else 'PASSED'),
             'counts':{'dates':len({r.get('meeting_date') for r in races}),'races':len(races),
                       'runners':runner_count,'sectionals':sections,'dividends':dividends},
@@ -107,6 +133,21 @@ def validate_database(races, engine):
                         same=(abs(value-db_value)<.0001 if isinstance(value,(float,int)) and db_value is not None else value==db_value)
                         if value is not None and not same:
                             errors.append({'race_id':rid,'runner_id':row['runner_id'],'message':'DB value mismatch: '+field})
+        for race in races:
+            timed=race.get('race_time_weather') or {}
+            if not timed.get('target_at'):
+                continue
+            expected={field:observation for field,observation in timed.get('fields',{}).items() if observation.get('status')=='AVAILABLE'}
+            observed=list(conn.execute(text("""SELECT w.field_name,w.source_payload FROM weather_observations w
+                JOIN race_weather_matches m ON m.observation_id=w.id
+                WHERE m.race_id=:id AND m.target_at=:target AND w.field_name IS NOT NULL"""),
+                {'id':race['race_id'],'target':timed['target_at']}).mappings())
+            if len(observed)!=len(expected):
+                errors.append({'race_id':race['race_id'],'message':'Timed weather DB count mismatch'})
+            for row in observed:
+                field=row['field_name']; source=expected.get(field,{})
+                if row['source_payload']!=source:
+                    errors.append({'race_id':race['race_id'],'message':'Timed weather DB provenance mismatch: '+field})
         orphan=conn.execute(text('SELECT COUNT(*) FROM runners r LEFT JOIN races t ON r.race_id=t.race_id WHERE t.race_id IS NULL')).scalar()
         if orphan:
             errors.append({'message':f'{orphan} orphan runner records'})

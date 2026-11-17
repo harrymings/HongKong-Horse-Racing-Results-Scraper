@@ -111,12 +111,23 @@ def test_incremental_skip(parsed,tmp_path,monkeypatch):
 
 
 @pytest.mark.skipif(not os.getenv('TEST_DATABASE_URL'),reason='Set TEST_DATABASE_URL to an isolated disposable PostgreSQL database')
-def test_postgres_idempotence(parsed,tmp_path):
+def test_postgres_idempotence(parsed,tmp_path,request):
     from sqlalchemy import create_engine,text
     from ingest import ensure_schema,ingest
     from migrate import migrate
     from persistence import atomic_json
-    engine=create_engine(os.environ['TEST_DATABASE_URL'])
+    import uuid
+    schema='hkjc_test_'+uuid.uuid4().hex
+    admin=create_engine(os.environ['TEST_DATABASE_URL'])
+    with admin.begin() as conn:
+        conn.exec_driver_sql('CREATE SCHEMA '+schema)
+    engine=create_engine(os.environ['TEST_DATABASE_URL'],connect_args={'options':'-csearch_path='+schema})
+    def cleanup():
+        engine.dispose()
+        with admin.begin() as conn:
+            conn.exec_driver_sql('DROP SCHEMA '+schema+' CASCADE')
+        admin.dispose()
+    request.addfinalizer(cleanup)
     ensure_schema(engine); migrate(engine); migrate(engine)
     parsed['venue_weather']={'date':parsed['meeting_date'],'station':'Sha Tin','station_code':'SHA',
         'resolution':'daily','mean_temp_c':23.4,'source_url':'fixture://hko'}
@@ -139,6 +150,19 @@ def test_postgres_idempotence(parsed,tmp_path):
     ingest(engine,tmp_path)
     with engine.connect() as conn:
         assert conn.execute(text('SELECT finishing_time FROM runners WHERE runner_id=:id'),{'id':parsed['runners'][0]['runner_id']}).scalar()==pytest.approx(69.18)
+    from race_weather import RaceWeatherProvider,enrich_race_time_weather
+    from test_race_time_weather import source_transport
+    timed_provider=RaceWeatherProvider(tmp_path/'timed_cache',httpx.Client(transport=httpx.MockTransport(source_transport)),rate_limit=0)
+    try:
+        parsed=enrich_race_time_weather(parsed,timed_provider)
+    finally:
+        timed_provider.close()
+    atomic_json(tmp_path/f"race_{parsed['race_id']}.json",parsed)
+    ingest(engine,tmp_path);ingest(engine,tmp_path)
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT COUNT(*) FROM weather_observations WHERE observed_at IS NOT NULL')).scalar()==5
+        assert conn.execute(text('SELECT COUNT(*) FROM race_weather_matches WHERE target_at IS NOT NULL')).scalar()==5
+        assert conn.execute(text("SELECT source_payload->>'value' FROM weather_observations WHERE field_name='temperature_c'")).scalar()=='23.8'
     engine.dispose()
 
 
@@ -163,3 +187,25 @@ def test_smaller_roster_cannot_look_complete(parsed,tmp_path):
     assert len(result['runners'])==14
     assert result['roster_refresh_status']=='MISMATCH_PRESERVED_HISTORY'
     assert validate_races([result])['errors']
+
+
+def test_timed_weather_csv_and_json_exports(parsed,tmp_path,monkeypatch):
+    import dashboard
+    from race_weather import RaceWeatherProvider,enrich_race_time_weather
+    from test_race_time_weather import source_transport
+    provider=RaceWeatherProvider(tmp_path/'cache',httpx.Client(transport=httpx.MockTransport(source_transport)),rate_limit=0)
+    try:
+        enriched=enrich_race_time_weather(parsed,provider)
+    finally:
+        provider.close()
+    monkeypatch.setattr(dashboard,'OUTPUT_DIR',tmp_path)
+    names=dashboard._save_exports([enriched],'hkjc_timed','both')
+    import pandas as pd
+    frame=pd.read_csv(tmp_path/names[0])
+    assert frame.iloc[0]['RaceTimeTempC']==23.8
+    assert frame.iloc[0]['RaceTimeWeatherTargetKind']=='SCHEDULED'
+    assert frame.iloc[0]['RaceTimeWeatherResolution']=='mixed'
+    provenance=json.loads(frame.iloc[0]['RaceTimeWeatherProvenance'])
+    assert provenance['temperature_c']['interval_minutes']==1
+    assert provenance['rainfall_mm']['status']=='ARCHIVE_UNAVAILABLE'
+    assert json.loads((tmp_path/names[1]).read_text())[0]['race_time_weather']['humidity_pct']==92

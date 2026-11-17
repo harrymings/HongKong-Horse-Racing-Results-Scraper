@@ -53,6 +53,9 @@ def ingest(engine=None, data_dir=None):
     if "source_payload" not in {c["name"] for c in inspect(eng).get_columns("races")}:
         raise RuntimeError("Run migrate.py --backup-verified against a backed-up DB before ingestion")
 
+    if any(r.get('race_time_weather',{}).get('fields') for r in records):
+        if 'observed_at' not in {c['name'] for c in inspect(eng).get_columns('weather_observations')}:
+            raise RuntimeError('Run migrate.py --backup-verified to apply timed-weather migration 002')
     processed_races = 0
     with eng.begin() as conn:
         for f in files:
@@ -194,6 +197,31 @@ def _ingest_enrichment(conn, race):
             dict(id=oid,station=station,day=day,resolution=resolution,payload=_json(observation)))
         conn.execute(text("""INSERT INTO race_weather_matches(race_id,observation_id,match_policy)
             VALUES(:race,:id,'same station/date; daily summary; not pre-race') ON CONFLICT DO NOTHING"""),dict(race=race_id,id=oid))
+
+    # Timed fields are separate observations: one-minute temperature is never labelled hourly.
+    timed = race.get('race_time_weather') or {}
+    target = timed.get('target_at')
+    for field, observation in timed.get('fields',{}).items():
+        if observation.get('status') != 'AVAILABLE' or observation.get('value') is None:
+            continue
+        from race_weather import aware
+        end = aware(observation['observation_period_end'])
+        if not target or end > aware(target) or aware(observation['known_at']) > aware(target):
+            raise ValueError('Timed weather exceeds race cutoff')
+        oid=hashlib.sha256(_json([observation['station_code'],field,observation['observed_at'],observation['source_url']]).encode()).hexdigest()
+        conn.execute(text("""INSERT INTO weather_observations(id,station_code,observation_date,resolution,
+            observed_at,period_start,period_end,known_at,field_name,source_payload)
+            VALUES(:id,:station,:day,:resolution,:observed,:start,:end,:known,:field,CAST(:payload AS JSONB))
+            ON CONFLICT(id) DO UPDATE SET source_payload=EXCLUDED.source_payload"""),
+            dict(id=oid,station=observation['station_code'],day=end.date(),resolution=observation['resolution'],
+                 observed=observation['observed_at'],start=observation['observation_period_start'],
+                 end=observation['observation_period_end'],known=observation['known_at'],field=field,payload=_json(observation)))
+        conn.execute(text("""INSERT INTO race_weather_matches(race_id,observation_id,match_policy,target_at,target_kind,age_minutes)
+            VALUES(:race,:id,:policy,:target,:kind,:age)
+            ON CONFLICT(race_id,observation_id) DO UPDATE SET target_at=EXCLUDED.target_at,
+            target_kind=EXCLUDED.target_kind,age_minutes=EXCLUDED.age_minutes,match_policy=EXCLUDED.match_policy"""),
+            dict(race=race_id,id=oid,policy=timed['match_policy'],target=target,
+                 kind=timed['target_kind'],age=observation.get('age_minutes')))
 
 
 if __name__ == '__main__':

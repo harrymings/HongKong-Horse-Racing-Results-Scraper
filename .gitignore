@@ -35,3 +35,5 @@ dashboard_stderr.log
 Thumbs.db
 Desktop.ini
 model.evaluation.json
+
+/weather_cache/

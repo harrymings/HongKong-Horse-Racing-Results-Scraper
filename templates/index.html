@@ -155,7 +155,7 @@
                 <button id="stop-btn" class="button stop" type="button" disabled>Stop job</button>
                 <button class="button secondary" id="refresh-files" type="button">Refresh exports</button>
               </div>
-              <p class="weather-note">Weather is matched to each meeting date using HKO daily observations, not race-time readings; racecourse-station values are included where available. Missing dates stay blank. Initial odds, gear, and jockey claims are not available in the results source.</p>
+              <p class="weather-note">Daily weather is kept separately. Race-time weather uses archived HKO observations at or before the scheduled start, where available; each field retains its station and observation interval. Missing dates stay blank. Initial odds, gear, and jockey claims are not available in the results source.</p>
             </form>
           </div>
         </section>
@@ -294,7 +294,7 @@
             const table = document.createElement('table');
             const head = document.createElement('thead');
             const headerRow = document.createElement('tr');
-            const labels = { VenueWeatherStation: 'Racecourse station', VenueMaxTempC: 'Venue max (°C)', VenueMinTempC: 'Venue min (°C)', VenueMeanTempC: 'Venue mean (°C)', VenueWeatherStatus: 'Venue weather', WeatherMeanTempC: 'HKO mean temp (°C)', WeatherRainfallMm: 'HKO rain (mm)', WeatherMeanCloudPct: 'HKO cloud cover (%)', WeatherStatus: 'HKO weather status', FinalWinOdds: 'Final odds' };
+            const labels = { RaceTimeWeatherStatus: 'Race-time status', ScheduledStartAtHKT: 'Scheduled start (HKT)', RaceTimeTempC: 'Race-time temp (°C)', RaceTimeHumidityPct: 'Race-time humidity (%)', RaceTimeWindSpeedKph: 'Race-time wind (km/h)', VenueWeatherStation: 'Racecourse station', VenueMaxTempC: 'Venue max (°C)', VenueMinTempC: 'Venue min (°C)', VenueMeanTempC: 'Venue mean (°C)', VenueWeatherStatus: 'Venue weather', WeatherMeanTempC: 'HKO mean temp (°C)', WeatherRainfallMm: 'HKO rain (mm)', WeatherMeanCloudPct: 'HKO cloud cover (%)', WeatherStatus: 'HKO weather status', FinalWinOdds: 'Final odds' };
             for (const column of data.columns) {
               const cell = document.createElement('th');
               cell.textContent = labels[column] || column;

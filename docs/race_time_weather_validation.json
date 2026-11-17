@@ -1,0 +1,180 @@
+{
+  "checked_at": "2026-11-17",
+  "races": [
+    {
+      "race_number": 1,
+      "scheduled_start_at_hkt": "2026-11-14T12:30:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 23.8,
+      "humidity_pct": 92.0,
+      "wind_speed_kph": 5.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 2,
+      "scheduled_start_at_hkt": "2026-11-14T13:00:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 24.2,
+      "humidity_pct": 91.0,
+      "wind_speed_kph": 4.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 3,
+      "scheduled_start_at_hkt": "2026-11-14T13:55:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 24.3,
+      "humidity_pct": 89.0,
+      "wind_speed_kph": 7.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 4,
+      "scheduled_start_at_hkt": "2026-11-14T14:25:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 24.6,
+      "humidity_pct": 87.0,
+      "wind_speed_kph": 6.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 5,
+      "scheduled_start_at_hkt": "2026-11-14T14:55:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 24.6,
+      "humidity_pct": 87.0,
+      "wind_speed_kph": 8.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 6,
+      "scheduled_start_at_hkt": null,
+      "status": "NOT_APPLICABLE_ABANDONED",
+      "temperature_c": null,
+      "humidity_pct": null,
+      "wind_speed_kph": null,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 7,
+      "scheduled_start_at_hkt": "2026-11-14T16:00:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 24.5,
+      "humidity_pct": 87.0,
+      "wind_speed_kph": 7.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 8,
+      "scheduled_start_at_hkt": "2026-11-14T16:30:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 24.4,
+      "humidity_pct": 87.0,
+      "wind_speed_kph": 8.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 9,
+      "scheduled_start_at_hkt": "2026-11-14T17:00:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 24.3,
+      "humidity_pct": 87.0,
+      "wind_speed_kph": 6.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 10,
+      "scheduled_start_at_hkt": "2026-11-14T17:35:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 24.2,
+      "humidity_pct": 86.0,
+      "wind_speed_kph": 4.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    },
+    {
+      "race_number": 11,
+      "scheduled_start_at_hkt": "2026-11-14T18:10:00+08:00",
+      "status": "PARTIAL",
+      "temperature_c": 23.8,
+      "humidity_pct": 88.0,
+      "wind_speed_kph": 9.0,
+      "rainfall_mm": null,
+      "pre_race_verified": false
+    }
+  ],
+  "source_attribution": "Hong Kong Observatory, HKSAR Government and DATA.GOV.HK",
+  "production_db_modified": false,
+  "validation": {
+    "status": "PASSED",
+    "counts": {
+      "dates": 1,
+      "races": 11,
+      "runners": 140,
+      "sectionals": 514,
+      "dividends": 180
+    },
+    "null_counts": {
+      "horse_name": 0,
+      "horse_code": 0,
+      "draw": 3,
+      "actual_weight": 0,
+      "declared_horse_weight": 3,
+      "finishing_pos": 5,
+      "finishing_time": 3,
+      "win_odds": 3
+    },
+    "null_share": {
+      "horse_name": 0.0,
+      "horse_code": 0.0,
+      "draw": 0.02142857142857143,
+      "actual_weight": 0.0,
+      "declared_horse_weight": 0.02142857142857143,
+      "finishing_pos": 0.03571428571428571,
+      "finishing_time": 0.02142857142857143,
+      "win_odds": 0.02142857142857143
+    },
+    "errors": [],
+    "warnings": [
+      {
+        "race_id": "0bcf70a3e1a83ee03358905fd980adebfe3ce24d",
+        "runner_id": "cfe66d23b0db96a24c75380d22fd39f81ebd0e2b",
+        "message": "Sectionals unverified: TIME_MISMATCH"
+      },
+      {
+        "race_id": "ba533a66acfdfa953978495e555b5144475c5fc8",
+        "runner_id": "fab650bbbbb6fb78849a286b6f3cbcc311a54496",
+        "message": "Sectionals unverified: TIME_MISMATCH"
+      },
+      {
+        "race_id": "ba533a66acfdfa953978495e555b5144475c5fc8",
+        "runner_id": "e7b36df92e6ed0e2ca43aaefb5b16e4f0ec9570a",
+        "message": "Sectionals unverified: MISSING_AT_SOURCE"
+      }
+    ],
+    "coverage_status": "UNVERIFIED_WITHOUT_MEETING_MANIFEST",
+    "database_parity": {
+      "status": "PASSED",
+      "counts": {
+        "races": 11,
+        "runners": 140,
+        "sectionals": 514,
+        "dividends": 180
+      },
+      "errors": []
+    }
+  },
+  "tests": {
+    "local_full_suite_passed": 62,
+    "postgresql": "isolated PostgreSQL 17; 50 live field observations and 50 matches; repeated ingestion and parity passed"
+  }
+}

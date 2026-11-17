@@ -36,6 +36,11 @@ def merge_non_null(old, new):
     if isinstance(old, dict) and isinstance(new, dict):
         result = dict(old)
         for key, value in new.items():
+            if key == 'race_time_weather':
+                # This object is already merged against an exact target/station by its enricher.
+                # Generic null-preservation would attach old weather to a changed race time.
+                result[key] = value
+                continue
             if key in {'weather', 'venue_weather'} and isinstance(old.get(key), dict) and isinstance(value, dict):
                 value = merge_weather(old[key], value)
             result[key] = merge_non_null(old.get(key), value)

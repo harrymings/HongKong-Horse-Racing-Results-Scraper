@@ -1,0 +1,167 @@
+{
+  "scope": "Sampled days and last snapshot only. Not a continuous historical year-by-year guarantee.",
+  "attribution": "Hong Kong Observatory, HKSAR Government and DATA.GOV.HK; provisional observations.",
+  "results": [
+    {
+      "date": "2018-11-14",
+      "dataset": "temperature",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_temperature.csv&start=20181114&end=20181114",
+      "stations": {},
+      "status": "NO_ARCHIVE_FOR_DATE",
+      "version_count": 0,
+      "first_capture": null,
+      "last_capture": null
+    },
+    {
+      "date": "2018-11-14",
+      "dataset": "humidity",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_humidity.csv&start=20181114&end=20181114",
+      "stations": {},
+      "status": "NO_ARCHIVE_FOR_DATE",
+      "version_count": 0,
+      "first_capture": null,
+      "last_capture": null
+    },
+    {
+      "date": "2018-11-14",
+      "dataset": "wind",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_10min_wind.csv&start=20181114&end=20181114",
+      "stations": {},
+      "status": "NO_ARCHIVE_FOR_DATE",
+      "version_count": 0,
+      "first_capture": null,
+      "last_capture": null
+    },
+    {
+      "date": "2018-11-14",
+      "dataset": "rainfall",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fopendata%2FhourlyRainfall.php%3Flang%3Den&start=20181114&end=20181114",
+      "stations": {},
+      "status": "ARCHIVE_UNAVAILABLE"
+    },
+    {
+      "date": "2022-11-14",
+      "dataset": "temperature",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_temperature.csv&start=20221114&end=20221114",
+      "stations": {
+        "Sha Tin": {
+          "temperature_c": "AVAILABLE"
+        },
+        "Happy Valley": {
+          "temperature_c": "AVAILABLE"
+        }
+      },
+      "status": "SAMPLED_LAST_SNAPSHOT",
+      "version_count": 142,
+      "first_capture": "20221114-0000",
+      "last_capture": "20221114-2350"
+    },
+    {
+      "date": "2022-11-14",
+      "dataset": "humidity",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_humidity.csv&start=20221114&end=20221114",
+      "stations": {
+        "Sha Tin": {
+          "humidity_pct": "AVAILABLE"
+        },
+        "Happy Valley": {
+          "humidity_pct": "STATION_NOT_REPORTED"
+        }
+      },
+      "status": "SAMPLED_LAST_SNAPSHOT",
+      "version_count": 142,
+      "first_capture": "20221114-0000",
+      "last_capture": "20221114-2350"
+    },
+    {
+      "date": "2022-11-14",
+      "dataset": "wind",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_10min_wind.csv&start=20221114&end=20221114",
+      "stations": {
+        "Sha Tin": {
+          "wind_speed_kph": "AVAILABLE",
+          "wind_direction": "AVAILABLE",
+          "wind_gust_kph": "AVAILABLE"
+        },
+        "Happy Valley": {
+          "wind_speed_kph": "STATION_NOT_REPORTED",
+          "wind_direction": "STATION_NOT_REPORTED",
+          "wind_gust_kph": "STATION_NOT_REPORTED"
+        }
+      },
+      "status": "SAMPLED_LAST_SNAPSHOT",
+      "version_count": 142,
+      "first_capture": "20221114-0000",
+      "last_capture": "20221114-2350"
+    },
+    {
+      "date": "2022-11-14",
+      "dataset": "rainfall",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fopendata%2FhourlyRainfall.php%3Flang%3Den&start=20221114&end=20221114",
+      "stations": {},
+      "status": "ARCHIVE_UNAVAILABLE"
+    },
+    {
+      "date": "2026-11-14",
+      "dataset": "temperature",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_temperature.csv&start=20261114&end=20261114",
+      "stations": {
+        "Sha Tin": {
+          "temperature_c": "AVAILABLE"
+        },
+        "Happy Valley": {
+          "temperature_c": "AVAILABLE"
+        }
+      },
+      "status": "SAMPLED_LAST_SNAPSHOT",
+      "version_count": 144,
+      "first_capture": "20261114-0009",
+      "last_capture": "20261114-2358"
+    },
+    {
+      "date": "2026-11-14",
+      "dataset": "humidity",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_1min_humidity.csv&start=20261114&end=20261114",
+      "stations": {
+        "Sha Tin": {
+          "humidity_pct": "AVAILABLE"
+        },
+        "Happy Valley": {
+          "humidity_pct": "STATION_NOT_REPORTED"
+        }
+      },
+      "status": "SAMPLED_LAST_SNAPSHOT",
+      "version_count": 144,
+      "first_capture": "20261114-0009",
+      "last_capture": "20261114-2358"
+    },
+    {
+      "date": "2026-11-14",
+      "dataset": "wind",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2Fregional-weather%2Flatest_10min_wind.csv&start=20261114&end=20261114",
+      "stations": {
+        "Sha Tin": {
+          "wind_speed_kph": "AVAILABLE",
+          "wind_direction": "AVAILABLE",
+          "wind_gust_kph": "AVAILABLE"
+        },
+        "Happy Valley": {
+          "wind_speed_kph": "STATION_NOT_REPORTED",
+          "wind_direction": "STATION_NOT_REPORTED",
+          "wind_gust_kph": "STATION_NOT_REPORTED"
+        }
+      },
+      "status": "SAMPLED_LAST_SNAPSHOT",
+      "version_count": 144,
+      "first_capture": "20261114-0009",
+      "last_capture": "20261114-2358"
+    },
+    {
+      "date": "2026-11-14",
+      "dataset": "rainfall",
+      "source_url": "https://app.data.gov.hk/v1/historical-archive/list-file-versions?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fopendata%2FhourlyRainfall.php%3Flang%3Den&start=20261114&end=20261114",
+      "stations": {},
+      "status": "ARCHIVE_UNAVAILABLE"
+    }
+  ]
+}

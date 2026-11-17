@@ -133,3 +133,11 @@ Desktop screenshots use a 1440 px viewport and show the actual completed job and
 preview. At 375 px, the 900 px export table scrolls inside its container instead
 of collapsing columns. Last submitted course/format/grouping settings remain
 visible after starting a job. See `desktop_demo_report.json` for counts and status.
+
+## Timestamped weather follow-up (2026-11-17)
+
+Race-time observations and scheduled starts are now implemented with a separate
+source audit and regression suite. Earlier open gates about absent timed weather
+reflect the initial audit. See [current source coverage, interval semantics and
+limitations](RACE_TIME_WEATHER.md). Actual off-times and verified historical
+prediction cutoffs remain unavailable. Daily observations remain daily.
